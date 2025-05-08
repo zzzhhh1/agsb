@@ -945,9 +945,9 @@ def save_links(links, port_vm_ws, argodomain):
         f.write("{}\n\n".format(baseurl))
         f.write("---------------------------------------------------------\n")
         f.write("相关快捷方式如下：\n")
-        f.write("显示域名及节点信息：agsb 或 python agsb.py\n")
-        f.write("升级脚本：agsb up 或 python agsb.py up\n")
-        f.write("卸载脚本：agsb del 或 python agsb.py del\n")
+        f.write("显示域名及节点信息：agsb 或 python3 agsb.py\n")
+        f.write("升级脚本：agsb up 或 python3 agsb.py up\n")
+        f.write("卸载脚本：agsb del 或 python3 agsb.py del\n")
         f.write("---------------------------------------------------------\n")
 
 # 主函数
