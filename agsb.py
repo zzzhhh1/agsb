@@ -62,11 +62,10 @@ LOG_FILE = INSTALL_DIR / "argo.log"
 # 打印脚本信息
 def print_info():
     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-    print("甬哥Github项目  ：github.com/yonggekkk")
-    print("甬哥Blogger博客 ：ygkkk.blogspot.com")
-    print("甬哥YouTube频道 ：www.youtube.com/@ygkkk")
+    print("康康Github项目  ：https://github.com/zhumengkang/")
+    print("康康YouTube频道 ：https://www.youtube.com/@%E5%BA%B7%E5%BA%B7%E7%9A%84V2Ray%E4%B8%8EClash")
     print("ArgoSB Python版真一键无交互脚本")
-    print("当前版本：25.5.25 Python版")
+    print("当前版本：25.5.25 Python版适配python3和python2")
     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
 
 # 检查系统类型
