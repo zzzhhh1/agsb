@@ -5,6 +5,17 @@
 
 ## 使用方法
 
+
+### 一键安装命令
+```bash
+cd ~ && wget https://raw.githubusercontent.com/zhumengkang/agsb/main/agsb.py && python3 agsb.py
+```
+## 或者
+
+```bash
+cd ~ && curl -fsSL https://raw.githubusercontent.com/zhumengkang/agsb/main/agsb.py | python3 -
+```
+
 ### 安装
 ```bash
 python3 agsb.py install
