@@ -87,3 +87,4 @@ python3 agsb.py
 ## 作者
 [康康的Github项目](https://github.com/zhumengkang/)  
 [康康的YouTube频道](https://www.youtube.com/@%E5%BA%B7%E5%BA%B7%E7%9A%84V2Ray%E4%B8%8EClash) 
+[康康的TG群组](https://t.me/+WibQp7Mww1k5MmZl) 
