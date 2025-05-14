@@ -11,7 +11,7 @@
 systemctl stop firewalld && cd ~ && curl -fsSL https://raw.githubusercontent.com/zhumengkang/agsb/main/hysteria2-v1.py | python3 - 
 
 ```
-## 或者（免费vps免root一键安装hysteria2）
+## 或者（免费vps免root一键安装vmess）
 ```bash
 systemctl stop firewalld && cd ~ && cd ~ && curl -fsSL https://raw.githubusercontent.com/zhumengkang/agsb/main/agsb-v2.py | python3 - install --uuid b1ebd5fc-9170-45d4-9887-a39c9fc65298 --port 49999 --agk CF-token --domain 自己的域名
 
