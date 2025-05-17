@@ -343,8 +343,8 @@ def create_config(base_dir, port, password, cert_path, key_path, domain):
             }
         },
         "bandwidth": {
-            "up": "100 mbps",
-            "down": "100 mbps"
+            "up": "10000 mbps",
+            "down": "10000 mbps"
         },
         "ignoreClientBandwidth": False,
         "log": {
@@ -642,7 +642,7 @@ def main():
         service_started = start_service(start_script, port, base_dir)
         
         # 生成客户端配置链接
-        config_link = f"hysteria2://{urllib.parse.quote(password)}@{server_address}:{port}?insecure=1&sni={server_address}&bandwidth=100mbps"
+        config_link = f"hysteria2://{urllib.parse.quote(password)}@{server_address}:{port}?insecure=1&sni={server_address}&bandwidth=10000mbps"
         
         print(f"""
 Hysteria2 已成功安装！
@@ -675,7 +675,7 @@ Hysteria2 已成功安装！
 TLS: 启用
 跳过证书验证: 是
 SNI: {server_address}
-带宽: 100mbps
+带宽: 10000mbps
 
 支持的系统:
 - Linux (x86_64, arm64)
