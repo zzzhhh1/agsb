@@ -106,9 +106,6 @@ cat > $ROOTFS_DIR/root/.bashrc << EOF
 if [ -f /etc/bash.bashrc ]; then
   . /etc/bash.bashrc
 fi
-
-# 显示提示信息
-PS1='\[\033[1;32m\]proot-ubuntu\[\033[0m\]:\[\033[1;34m\]\w\[\033[0m\]\\$ '
 EOF
 
 # 创建初始化脚本，并传递当前用户名作为变量
@@ -154,37 +151,20 @@ printf "\033[1;33m##############################################################
 printf "\033[1;32m\n★ YouTube请点击关注!\033[0m\n"
 printf "\033[1;32m★ Github请点个Star支持!\033[0m\n\n"
 printf "\033[1;36m欢迎进入Ubuntu 20.04环境!\033[0m\n\n"
-printf "\033[1;33m提示: 输入 'exit' 可以退出proot环境\033[0m\n\n"
 
-# 执行bash
-exec /bin/bash --login
+# 启动bash
+/bin/bash
 EOF
 
 # 设置初始化脚本执行权限
 chmod +x $ROOTFS_DIR/root/init.sh
 
-# 创建启动脚本
-cat > $ROOTFS_DIR/start-proot.sh << EOF
-#!/bin/sh
-# 启动proot环境
-$(pwd)/usr/local/bin/proot \\
-  --rootfs="$(pwd)" \\
-  -0 -w "/root" -b /dev -b /sys -b /proc -b /etc/resolv.conf --kill-on-exit \\
-  /bin/bash /root/init.sh
-EOF
-
-chmod +x $ROOTFS_DIR/start-proot.sh
-
 # 清屏并显示完成信息
 clear
 display_gg
-echo -e "\n${CYAN}Ubuntu proot环境已安装完成!${RESET_COLOR}"
-echo -e "${CYAN}使用以下命令启动proot环境:${RESET_COLOR}"
-echo -e "${WHITE}    ./start-proot.sh${RESET_COLOR}"
-echo -e "${CYAN}在proot环境中输入 'exit' 可以退出${RESET_COLOR}\n"
 
 # 启动proot环境并执行初始化脚本
-exec $ROOTFS_DIR/usr/local/bin/proot \
+$ROOTFS_DIR/usr/local/bin/proot \
   --rootfs="${ROOTFS_DIR}" \
   -0 -w "/root" -b /dev -b /sys -b /proc -b /etc/resolv.conf --kill-on-exit \
   /bin/bash /root/init.sh
