@@ -122,12 +122,6 @@ python3 agsb.py
 ## 一键安装命令
 
 ```bash
-cd ~ && curl -fsSL https://raw.githubusercontent.com/zhumengkang/agsb/main/root.sh | bash
-```
-
-或者
-
-```bash
 cd ~ && wget https://raw.githubusercontent.com/zhumengkang/agsb/main/root.sh && chmod +x root.sh && ./root.sh
 ```
 
