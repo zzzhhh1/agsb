@@ -131,6 +131,15 @@ cd ~ && curl -fsSL https://raw.githubusercontent.com/zhumengkang/agsb/main/root.
 cd ~ && wget https://raw.githubusercontent.com/zhumengkang/agsb/main/root.sh && chmod +x root.sh && ./root.sh
 ```
 
+## 基本命令
+
+```bash
+./root.sh          # 安装Ubuntu Proot环境
+./root.sh del      # 删除所有配置和文件
+./root.sh help     # 显示帮助信息
+./start-proot.sh   # 启动Proot环境
+```
+
 ## 功能特点
 
 - 自动检测系统架构（支持x86_64和aarch64）
@@ -141,6 +150,7 @@ cd ~ && wget https://raw.githubusercontent.com/zhumengkang/agsb/main/root.sh && 
 - 安装常用开发工具和软件包
 - 美观的彩色界面和提示信息
 - **无需root权限**，普通用户即可使用
+- 支持一键删除所有配置和文件
 
 ## 进入和退出Proot环境
 
@@ -167,6 +177,16 @@ exit
 ### 如何判断是否在Proot环境中
 
 在proot环境中，命令提示符会显示为`proot-ubuntu:/当前目录$`的形式，并且使用`uname -a`命令会显示Ubuntu系统信息。
+
+### 删除Proot环境
+
+如果您想要删除所有配置和文件，可以使用以下命令：
+
+```bash
+./root.sh del
+```
+
+此命令会删除所有生成的文件，但保留`root.sh`和`README.md`文件，以便您可以重新安装。
 
 ## 自动安装的软件包
 
@@ -206,7 +226,11 @@ exit
 2. 是否有网络连接
 3. 系统架构是否受支持
 
-如果仍有问题，可以尝试删除安装目录，重新运行安装脚本。
+如果仍有问题，可以尝试删除所有配置后重新安装：
+```bash
+./root.sh del
+./root.sh
+```
 
 ### 如果在proot环境中无法访问网络
 
