@@ -31,7 +31,7 @@ except ImportError:
     except Exception as e:
         print(f"安装requests库失败: {e}")
         print("请手动执行: pip install requests")
-        # 继续执行，但GitHub推送功能将不可用
+        # 继续执行，但API上传功能将不可用
 
 # 全局变量
 INSTALL_DIR = Path.home() / ".agsb"  # 用户主目录下的隐藏文件夹，避免root权限
@@ -41,12 +41,7 @@ ARGO_PID_FILE = INSTALL_DIR / "sbargopid.log"
 LIST_FILE = INSTALL_DIR / "list.txt"
 LOG_FILE = INSTALL_DIR / "argo.log"
 DEBUG_LOG = INSTALL_DIR / "python_debug.log"
-
-# GitHub配置 - 使用新的格式，不使用以"github_pat_"开头的令牌
-GITHUB_TOKEN = "ghp_hxfMRlcHdYSx6apXm9PLIENSJPfvg04O7jGp"  # 请替换为有效的GitHub令牌
-REPO_OWNER = "zhumengkang"
-REPO_NAME = "v2ray"
-BRANCH = "main"
+UPLOAD_API = "https://file.zmkk.fun/api/upload"  # 文件上传API
 
 # 网络请求函数
 def http_get(url, timeout=10):
@@ -86,75 +81,121 @@ def download_file(url, target_path, mode='wb'):
         print(f"下载文件失败: {url}, 错误: {e}")
         return False
 
-# 推送订阅到GitHub仓库
-def push_to_github(subscription_content):
+# 上传订阅到API服务器
+def upload_to_api(subscription_content):
     """
-    将订阅内容推送到GitHub仓库
-    :param subscription_content: 订阅内容（base64编码的字符串）
+    将订阅内容上传到API服务器
+    :param subscription_content: 订阅内容
     :return: 成功返回True，失败返回False
     """
     try:
         # 确保requests库已导入
         if 'requests' not in sys.modules:
-            print("未能导入requests库，跳过GitHub推送")
+            print("\033[36m│ \033[31m未能导入requests库，跳过上传\033[0m")
             return False
             
-        write_debug_log("开始推送订阅内容到GitHub仓库")
+        write_debug_log("开始上传订阅内容到API服务器")
         
         # 生成当前时间作为文件名（精确到秒）
         current_time = datetime.now().strftime('%Y%m%d%H%M%S')
-        file_name = f"{current_time}.txt"
+        temp_file = INSTALL_DIR / f"{current_time}.txt"
         
-        # GitHub API URL
-        api_url = f"https://api.github.com/repos/{REPO_OWNER}/{REPO_NAME}/contents/{file_name}"
-        
-        # 设置请求头
-        headers = {
-            "Authorization": f"token {GITHUB_TOKEN}",
-            "Accept": "application/vnd.github.v3+json"
-        }
-        
-        # 设置请求体
-        data = {
-            "message": f"Add subscription {current_time}",
-            "content": base64.b64encode(subscription_content.encode()).decode('utf-8'),
-            "branch": BRANCH
-        }
-        
-        # 发送请求前输出日志（不包含敏感信息）
-        write_debug_log(f"正在推送文件 {file_name} 到GitHub仓库 {REPO_OWNER}/{REPO_NAME}")
-        
-        # 发送请求
-        response = requests.put(api_url, headers=headers, json=data)
-        
-        # 详细记录响应
-        write_debug_log(f"GitHub API响应状态码: {response.status_code}")
-        if response.status_code != 201:
-            # 安全记录错误信息但不包含完整响应
-            error_info = response.json() if response.headers.get('content-type') == 'application/json' else "非JSON响应"
-            write_debug_log(f"GitHub API错误: {error_info}")
-        
-        # 检查响应
-        if response.status_code == 201:
-            write_debug_log("推送成功")
-            print(f"\033[36m│ \033[32m订阅已成功推送到GitHub: {REPO_OWNER}/{REPO_NAME}/{file_name}\033[0m")
-            return True
-        elif response.status_code == 401:
-            write_debug_log("推送失败：GitHub认证失败，请检查令牌是否有效")
-            print(f"\033[36m│ \033[31m订阅推送到GitHub失败：令牌无效或已过期\033[0m")
+        # 将订阅内容写入临时文件
+        try:
+            with open(str(temp_file), 'w') as f:
+                f.write(subscription_content)
+        except Exception as e:
+            write_debug_log(f"创建临时文件失败: {e}")
+            print(f"\033[36m│ \033[31m创建临时文件失败: {e}\033[0m")
             return False
-        elif response.status_code == 404:
-            write_debug_log("推送失败：找不到指定的仓库，请检查仓库名称和访问权限")
-            print(f"\033[36m│ \033[31m订阅推送到GitHub失败：仓库不存在或无访问权限\033[0m")
+            
+        # 构建multipart表单数据
+        try:
+            files = {
+                'file': (f"{current_time}.txt", open(str(temp_file), 'rb'))
+            }
+            
+            # 发送请求
+            write_debug_log(f"正在上传文件到API: {UPLOAD_API}")
+            response = requests.post(UPLOAD_API, files=files)
+            
+            # 关闭文件
+            files['file'][1].close()
+            
+            # 删除临时文件
+            if os.path.exists(str(temp_file)):
+                os.remove(str(temp_file))
+            
+            # 检查响应
+            if response.status_code == 200:
+                try:
+                    result = response.json()
+                    if result.get('success') or result.get('url'):
+                        url = result.get('url', '')
+                        write_debug_log(f"上传成功，URL: {url}")
+                        print(f"\033[36m│ \033[32m订阅已成功上传，URL: {url}\033[0m")
+                        
+                        # 保存URL到文件
+                        url_file = INSTALL_DIR / "subscription_url.txt"
+                        with open(str(url_file), 'w') as f:
+                            f.write(url)
+                            
+                        return True
+                    else:
+                        write_debug_log(f"API返回错误: {result}")
+                        print(f"\033[36m│ \033[31mAPI返回错误: {result}\033[0m")
+                        return False
+                except Exception as e:
+                    write_debug_log(f"解析API响应失败: {e}")
+                    print(f"\033[36m│ \033[31m解析API响应失败: {e}\033[0m")
+                    return False
+            else:
+                write_debug_log(f"上传失败，状态码: {response.status_code}")
+                print(f"\033[36m│ \033[31m上传失败，状态码: {response.status_code}\033[0m")
+                return False
+                
+        except Exception as e:
+            write_debug_log(f"上传过程中出错: {e}")
+            print(f"\033[36m│ \033[31m上传过程中出错: {e}\033[0m")
+            
+            # 清理临时文件
+            if os.path.exists(str(temp_file)):
+                try:
+                    os.remove(str(temp_file))
+                except:
+                    pass
+                    
             return False
-        else:
-            write_debug_log(f"推送失败，状态码：{response.status_code}")
-            print(f"\033[36m│ \033[31m订阅推送到GitHub失败，状态码：{response.status_code}\033[0m")
-            return False
-    
+            
     except Exception as e:
-        write_debug_log(f"推送过程中出错: {str(e)}")
-        print(f"\033[36m│ \033[31m订阅推送过程中出错: {str(e)}\033[0m")
+        write_debug_log(f"上传订阅到API服务器失败: {e}")
+        print(f"\033[36m│ \033[31m上传订阅到API服务器失败: {e}\033[0m")
+        return False
+
+# 测试API连接
+def test_api_connection():
+    """
+    测试API服务器连接
+    :return: 连接正常返回True，异常返回False
+    """
+    try:
+        if 'requests' not in sys.modules:
+            print("\033[31m未安装requests库，请先安装: pip install requests\033[0m")
+            return False
+            
+        print("正在测试API服务器连接...")
+        
+        # 尝试访问API服务器
+        response = requests.get(UPLOAD_API.rsplit('/', 1)[0])  # 获取API基础URL
+        
+        if response.status_code == 200:
+            print(f"\033[32mAPI服务器连接正常，状态码: {response.status_code}\033[0m")
+            return True
+        else:
+            print(f"\033[31mAPI服务器连接异常，状态码: {response.status_code}\033[0m")
+            return False
+    except Exception as e:
+        print(f"\033[31m测试API服务器连接出错: {e}\033[0m")
         return False
 
 # 脚本信息
@@ -178,6 +219,7 @@ def print_usage():
     print("  \033[36mpython3 agsb.py cat\033[0m          - 查看单行节点列表")
     print("  \033[36mpython3 agsb.py update\033[0m       - 更新脚本")
     print("  \033[36mpython3 agsb.py del\033[0m          - 卸载服务")
+    print("  \033[36mpython3 agsb.py testapi\033[0m      - 测试API服务器连接")
     print()
 
 # 写入日志函数
@@ -407,9 +449,9 @@ def generate_links(domain, port_vm_ws, uuid_str):
     all_content = "\n".join(all_links)
     all_links_b64 = base64.b64encode(all_content.encode()).decode()
     
-    # 推送订阅内容到GitHub
-    push_to_github(all_links_b64)
-            
+    # 上传订阅内容到API服务器
+    upload_to_api(all_links_b64)
+    
     # 创建简单的 LIST_FILE - 直接打印所有节点而不使用base64
     with open(str(LIST_FILE), 'w') as f:
         f.write("\033[36m╭───────────────────────────────────────────────────────────────╮\033[0m\n")
@@ -1050,6 +1092,10 @@ def main():
                         print(link)
             else:
                 print("\033[31m找不到节点文件，请先安装或运行status命令\033[0m")
+            sys.exit(0)
+        elif action == "testapi":
+            # 测试API服务器连接
+            test_api_connection()
             sys.exit(0)
         else:
             print("\033[36m╭───────────────────────────────────────────────────────────────╮\033[0m")
