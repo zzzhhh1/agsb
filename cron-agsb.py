@@ -18,7 +18,20 @@ from pathlib import Path
 import urllib.request
 import ssl
 import tempfile
-import requests  # 添加requests库用于GitHub API调用
+
+# 检查requests库是否安装，如果未安装则尝试安装
+try:
+    import requests
+except ImportError:
+    print("检测到未安装requests库，正在尝试安装...")
+    try:
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "requests"])
+        import requests
+        print("requests库安装成功")
+    except Exception as e:
+        print(f"安装requests库失败: {e}")
+        print("请手动执行: pip install requests")
+        # 继续执行，但GitHub推送功能将不可用
 
 # 全局变量
 INSTALL_DIR = Path.home() / ".agsb"  # 用户主目录下的隐藏文件夹，避免root权限
@@ -29,8 +42,8 @@ LIST_FILE = INSTALL_DIR / "list.txt"
 LOG_FILE = INSTALL_DIR / "argo.log"
 DEBUG_LOG = INSTALL_DIR / "python_debug.log"
 
-# GitHub配置
-GITHUB_TOKEN = "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"
+# GitHub配置 - 使用新的格式，不使用以"github_pat_"开头的令牌
+GITHUB_TOKEN = "ghp_hxfMRlcHdYSx6apXm9PLIENSJPfvg04O7jGp"  # 请替换为有效的GitHub令牌
 REPO_OWNER = "zhumengkang"
 REPO_NAME = "v2ray"
 BRANCH = "main"
@@ -81,6 +94,11 @@ def push_to_github(subscription_content):
     :return: 成功返回True，失败返回False
     """
     try:
+        # 确保requests库已导入
+        if 'requests' not in sys.modules:
+            print("未能导入requests库，跳过GitHub推送")
+            return False
+            
         write_debug_log("开始推送订阅内容到GitHub仓库")
         
         # 生成当前时间作为文件名（精确到秒）
@@ -103,17 +121,34 @@ def push_to_github(subscription_content):
             "branch": BRANCH
         }
         
+        # 发送请求前输出日志（不包含敏感信息）
+        write_debug_log(f"正在推送文件 {file_name} 到GitHub仓库 {REPO_OWNER}/{REPO_NAME}")
+        
         # 发送请求
-        write_debug_log(f"正在推送文件 {file_name} 到GitHub仓库")
         response = requests.put(api_url, headers=headers, json=data)
+        
+        # 详细记录响应
+        write_debug_log(f"GitHub API响应状态码: {response.status_code}")
+        if response.status_code != 201:
+            # 安全记录错误信息但不包含完整响应
+            error_info = response.json() if response.headers.get('content-type') == 'application/json' else "非JSON响应"
+            write_debug_log(f"GitHub API错误: {error_info}")
         
         # 检查响应
         if response.status_code == 201:
             write_debug_log("推送成功")
             print(f"\033[36m│ \033[32m订阅已成功推送到GitHub: {REPO_OWNER}/{REPO_NAME}/{file_name}\033[0m")
             return True
+        elif response.status_code == 401:
+            write_debug_log("推送失败：GitHub认证失败，请检查令牌是否有效")
+            print(f"\033[36m│ \033[31m订阅推送到GitHub失败：令牌无效或已过期\033[0m")
+            return False
+        elif response.status_code == 404:
+            write_debug_log("推送失败：找不到指定的仓库，请检查仓库名称和访问权限")
+            print(f"\033[36m│ \033[31m订阅推送到GitHub失败：仓库不存在或无访问权限\033[0m")
+            return False
         else:
-            write_debug_log(f"推送失败，状态码：{response.status_code}，响应：{response.text}")
+            write_debug_log(f"推送失败，状态码：{response.status_code}")
             print(f"\033[36m│ \033[31m订阅推送到GitHub失败，状态码：{response.status_code}\033[0m")
             return False
     
