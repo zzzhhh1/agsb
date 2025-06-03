@@ -517,8 +517,10 @@ def daemonize():
         print(f"第一次fork失败: {e}")
         sys.exit(1)
     
-    # 修改工作目录
-    os.chdir('/')
+    # 修改工作目录 - 使用当前目录而不是根目录
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+    if current_dir:  # 如果能获取到当前目录
+        os.chdir(current_dir)
     
     # 创建新的会话，脱离控制终端
     os.setsid()
@@ -538,30 +540,43 @@ def daemonize():
     sys.stdout.flush()
     sys.stderr.flush()
     
-    # 创建PID文件
+    # 创建PID文件 - 在当前目录下
     pid = str(os.getpid())
-    pid_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'glitch.pid')
+    pid_file = 'glitch.pid'  # 简化为当前目录下的文件
     
-    with open(pid_file, 'w') as f:
-        f.write(pid)
+    try:
+        with open(pid_file, 'w') as f:
+            f.write(pid)
+    except Exception as e:
+        print(f"无法创建PID文件: {e}")
+        sys.exit(1)
     
     # 注册退出函数，删除PID文件
     def cleanup():
         try:
-            os.remove(pid_file)
+            if os.path.exists(pid_file):
+                os.remove(pid_file)
         except:
             pass
     
     atexit.register(cleanup)
     
     # 重定向标准输入输出到/dev/null
-    with open(os.devnull, 'r') as f:
-        os.dup2(f.fileno(), sys.stdin.fileno())
+    try:
+        with open(os.devnull, 'r') as f:
+            os.dup2(f.fileno(), sys.stdin.fileno())
+    except Exception as e:
+        print(f"重定向标准输入失败: {e}")
     
-    log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'glitch.log')
-    with open(log_file, 'a+') as f:
-        os.dup2(f.fileno(), sys.stdout.fileno())
-        os.dup2(f.fileno(), sys.stderr.fileno())
+    # 重定向输出到日志文件
+    log_file = 'glitch.log'  # 简化为当前目录下的文件
+    try:
+        with open(log_file, 'a+') as f:
+            os.dup2(f.fileno(), sys.stdout.fileno())
+            os.dup2(f.fileno(), sys.stderr.fileno())
+    except Exception as e:
+        print(f"重定向输出到日志文件失败: {e}")
+        sys.exit(1)
     
     print(f"\n{datetime.now()} - 守护进程已启动，PID: {pid}")
 
@@ -570,30 +585,48 @@ def run_in_background(args):
     print("正在启动后台进程...")
     
     # 检查PID文件是否存在
-    pid_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'glitch.pid')
+    pid_file = 'glitch.pid'  # 简化为当前目录下的文件
     if os.path.exists(pid_file):
-        with open(pid_file, 'r') as f:
-            pid = f.read().strip()
+        try:
+            with open(pid_file, 'r') as f:
+                pid = f.read().strip()
+                try:
+                    # 检查进程是否存在
+                    os.kill(int(pid), 0)
+                    print(f"脚本已经在后台运行，PID: {pid}")
+                    print("如果要重新启动，请先停止现有进程:")
+                    print(f"{sys.executable} {sys.argv[0]} --stop")
+                    return
+                except OSError:
+                    # 进程不存在，删除过期的PID文件
+                    os.remove(pid_file)
+        except Exception as e:
+            print(f"读取PID文件时出错: {e}")
+            # 尝试删除可能损坏的PID文件
             try:
-                # 检查进程是否存在
-                os.kill(int(pid), 0)
-                print(f"脚本已经在后台运行，PID: {pid}")
-                print("如果要重新启动，请先停止现有进程:")
-                print(f"{sys.executable} {sys.argv[0]} --stop")
-                return
-            except OSError:
-                # 进程不存在，删除过期的PID文件
                 os.remove(pid_file)
+            except:
+                pass
     
     # 将当前进程转变为守护进程
-    daemonize()
+    try:
+        daemonize()
+    except Exception as e:
+        print(f"启动守护进程失败: {e}")
+        sys.exit(1)
     
     # 设置日志
-    log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'glitch.log')
-    file_handler = logging.FileHandler(log_file)
-    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-    logger.addHandler(file_handler)
-    logger.removeHandler(logger.handlers[0])  # 移除控制台处理器
+    log_file = 'glitch.log'  # 简化为当前目录下的文件
+    try:
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+        logger.addHandler(file_handler)
+        
+        # 移除控制台处理器
+        if logger.handlers and len(logger.handlers) > 0:
+            logger.removeHandler(logger.handlers[0])
+    except Exception as e:
+        print(f"设置日志失败: {e}")
     
     # 运行主循环
     try:
@@ -604,7 +637,7 @@ def run_in_background(args):
 
 def stop_background_processes():
     """停止后台运行的脚本实例"""
-    pid_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'glitch.pid')
+    pid_file = 'glitch.pid'  # 简化为当前目录下的文件
     if not os.path.exists(pid_file):
         print("没有找到正在运行的脚本实例")
         return
@@ -639,13 +672,20 @@ def stop_background_processes():
             print(f"进程 {pid} 不存在")
         
         # 删除PID文件
-        os.remove(pid_file)
+        if os.path.exists(pid_file):
+            os.remove(pid_file)
     except Exception as e:
         print(f"停止进程时出错: {e}")
+        # 尝试删除可能损坏的PID文件
+        try:
+            if os.path.exists(pid_file):
+                os.remove(pid_file)
+        except:
+            pass
 
 def list_background_processes():
     """列出后台运行的脚本实例"""
-    pid_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'glitch.pid')
+    pid_file = 'glitch.pid'  # 简化为当前目录下的文件
     if not os.path.exists(pid_file):
         print("没有找到正在运行的脚本实例")
         return
@@ -660,7 +700,7 @@ def list_background_processes():
             print(f"脚本正在后台运行，PID: {pid}")
             
             # 显示日志文件位置
-            log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'glitch.log')
+            log_file = 'glitch.log'  # 简化为当前目录下的文件
             if os.path.exists(log_file):
                 print(f"日志文件: {log_file}")
                 print("查看日志: tail -f " + log_file)
@@ -669,6 +709,11 @@ def list_background_processes():
             os.remove(pid_file)
     except Exception as e:
         print(f"检查进程状态时出错: {e}")
+        # 尝试删除可能损坏的PID文件
+        try:
+            os.remove(pid_file)
+        except:
+            pass
 
 def run_main_loop(args):
     """运行主循环"""
