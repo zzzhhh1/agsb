@@ -152,6 +152,15 @@ curl -fsSL https://raw.githubusercontent.com/zhumengkang/agsb/main/cron-glitch.p
 
 # 下载并指定URL和访问间隔
 curl -fsSL https://raw.githubusercontent.com/zhumengkang/agsb/main/cron-glitch.py | python3 - --url https://your-project-name.glitch.me --interval 30-180
+
+# 一键下载并在后台运行（默认URL）
+curl -fsSL https://raw.githubusercontent.com/zhumengkang/agsb/main/cron-glitch.py -o glitch.py && nohup python3 glitch.py > glitch.log 2>&1 &
+
+# 一键下载并在后台运行（指定URL）
+curl -fsSL https://raw.githubusercontent.com/zhumengkang/agsb/main/cron-glitch.py -o glitch.py && nohup python3 glitch.py -u https://your-project-name.glitch.me > glitch.log 2>&1 &
+
+# 查看日志
+tail -f glitch.log
 ```
 
 ### 使用 wget 下载并运行
@@ -168,6 +177,15 @@ python3 glitch.py -u https://your-project-name.glitch.me
 
 # 指定URL和访问间隔
 python3 glitch.py --url https://your-project-name.glitch.me --interval 30-180
+
+# 一键下载并在后台运行（默认URL）
+wget https://raw.githubusercontent.com/zhumengkang/agsb/main/cron-glitch.py -O glitch.py && nohup python3 glitch.py > glitch.log 2>&1 &
+
+# 一键下载并在后台运行（指定URL）
+wget https://raw.githubusercontent.com/zhumengkang/agsb/main/cron-glitch.py -O glitch.py && nohup python3 glitch.py -u https://your-project-name.glitch.me > glitch.log 2>&1 &
+
+# 查看日志
+tail -f glitch.log
 ```
 
 ### 基本用法
