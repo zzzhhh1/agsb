@@ -10,6 +10,7 @@ import os
 import argparse
 import sys
 import shutil
+import subprocess
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -37,6 +38,12 @@ def parse_arguments():
                         help='删除指定URL的会话记录和Cookie')
     parser.add_argument('-c', '--clear-all', action='store_true',
                         help='清除所有会话记录和Cookie')
+    parser.add_argument('-b', '--background', action='store_true',
+                        help='在后台运行脚本(使用nohup)')
+    parser.add_argument('-s', '--stop', action='store_true',
+                        help='停止所有后台运行的脚本实例')
+    parser.add_argument('-l', '--list', action='store_true',
+                        help='列出所有正在运行的脚本实例')
     
     return parser.parse_args()
 
@@ -497,10 +504,120 @@ def send_request(url):
     except Exception as e:
         logger.error(f"发送请求时出错: {e}")
 
+def run_in_background(args):
+    """在后台运行脚本"""
+    # 构建命令行参数，排除--background选项
+    cmd = [sys.executable, sys.argv[0]]
+    
+    if args.url != DEFAULT_URL:
+        cmd.extend(['--url', args.url])
+    
+    if args.interval != "60-240":
+        cmd.extend(['--interval', args.interval])
+    
+    if args.verbose:
+        cmd.append('--verbose')
+    
+    # 使用nohup在后台运行
+    log_file = "glitch.log"
+    nohup_cmd = ['nohup'] + cmd + ['>', log_file, '2>&1', '&']
+    
+    try:
+        # 使用shell=True来执行命令，因为我们需要使用重定向符号
+        subprocess.run(' '.join(nohup_cmd), shell=True)
+        print(f"脚本已在后台启动，日志输出到 {log_file}")
+        print("可以使用以下命令查看日志:")
+        print(f"tail -f {log_file}")
+        print("\n要停止脚本，请运行:")
+        print(f"{sys.executable} {sys.argv[0]} --stop")
+    except Exception as e:
+        print(f"启动后台进程时出错: {e}")
+
+def stop_background_processes():
+    """停止所有后台运行的脚本实例"""
+    try:
+        # 获取脚本名称
+        script_name = os.path.basename(sys.argv[0])
+        
+        # 使用ps和grep查找运行中的实例
+        ps_cmd = f"ps aux | grep '{script_name}' | grep -v grep | grep -v stop"
+        ps_output = subprocess.check_output(ps_cmd, shell=True, text=True)
+        
+        if not ps_output.strip():
+            print("没有找到正在运行的脚本实例")
+            return
+        
+        # 提取进程ID
+        pids = []
+        for line in ps_output.splitlines():
+            parts = line.split()
+            if len(parts) > 1:
+                pids.append(parts[1])
+        
+        if not pids:
+            print("没有找到正在运行的脚本实例")
+            return
+        
+        # 终止进程
+        for pid in pids:
+            try:
+                subprocess.run(['kill', pid])
+                print(f"已终止进程ID: {pid}")
+            except Exception as e:
+                print(f"终止进程 {pid} 时出错: {e}")
+        
+        print(f"已停止 {len(pids)} 个脚本实例")
+    except Exception as e:
+        print(f"停止后台进程时出错: {e}")
+
+def list_background_processes():
+    """列出所有正在运行的脚本实例"""
+    try:
+        # 获取脚本名称
+        script_name = os.path.basename(sys.argv[0])
+        
+        # 使用ps和grep查找运行中的实例
+        ps_cmd = f"ps aux | grep '{script_name}' | grep -v grep | grep -v list"
+        ps_output = subprocess.check_output(ps_cmd, shell=True, text=True)
+        
+        if not ps_output.strip():
+            print("没有找到正在运行的脚本实例")
+            return
+        
+        print("正在运行的脚本实例:")
+        print("PID\t用户\t启动时间\t\t命令")
+        print("-" * 80)
+        
+        for line in ps_output.splitlines():
+            parts = line.split()
+            if len(parts) > 9:
+                pid = parts[1]
+                user = parts[0]
+                start_time = f"{parts[9]}"
+                cmd = ' '.join(parts[10:])
+                print(f"{pid}\t{user}\t{start_time}\t{cmd}")
+    except Exception as e:
+        print(f"列出后台进程时出错: {e}")
+
 # 主循环，以随机间隔发送请求
 def main():
     # 解析命令行参数
     args = parse_arguments()
+    
+    # 处理停止命令
+    if args.stop:
+        stop_background_processes()
+        return
+        
+    # 处理列出进程命令
+    if args.list:
+        list_background_processes()
+        return
+    
+    # 处理后台运行命令
+    if args.background:
+        run_in_background(args)
+        return
     
     # 设置目标URL
     target_url = args.url
