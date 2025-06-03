@@ -261,7 +261,54 @@ python glitch.py --verbose
 
 ## 在后台运行
 
-如果您想在后台运行脚本，可以使用以下命令：
+脚本提供了便捷的后台运行功能，可以让脚本在终端关闭后继续运行。
+
+### 使用内置后台功能
+
+```bash
+# 在后台运行（默认URL）
+python glitch.py -b
+# 或
+python glitch.py --background
+
+# 在后台运行并指定URL
+python glitch.py -b -u https://your-project-name.glitch.me
+# 或
+python glitch.py --background --url https://your-project-name.glitch.me
+
+# 在后台运行并指定URL和访问间隔
+python glitch.py -b -u https://your-project-name.glitch.me -i 30-180
+```
+
+### 管理后台进程
+
+```bash
+# 列出所有正在运行的脚本实例
+python glitch.py -l
+# 或
+python glitch.py --list
+
+# 停止所有正在运行的脚本实例
+python glitch.py -s
+# 或
+python glitch.py --stop
+```
+
+### 查看日志
+
+后台运行的脚本日志会保存在 `glitch.log` 文件中，可以使用以下命令查看：
+
+```bash
+# 查看完整日志
+cat glitch.log
+
+# 实时查看日志更新
+tail -f glitch.log
+```
+
+### 使用nohup手动运行
+
+如果您想手动使用nohup命令，也可以使用以下方式：
 
 ```bash
 # 使用nohup在后台运行
