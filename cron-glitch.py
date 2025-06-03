@@ -11,6 +11,7 @@ import argparse
 import sys
 import shutil
 import subprocess
+import atexit
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -504,135 +505,175 @@ def send_request(url):
     except Exception as e:
         logger.error(f"发送请求时出错: {e}")
 
+def daemonize():
+    """
+    将当前进程转变为守护进程
+    """
+    # 第一次fork，让shell认为进程结束
+    try:
+        if os.fork() > 0:
+            sys.exit(0)  # 父进程退出
+    except OSError as e:
+        print(f"第一次fork失败: {e}")
+        sys.exit(1)
+    
+    # 修改工作目录
+    os.chdir('/')
+    
+    # 创建新的会话，脱离控制终端
+    os.setsid()
+    
+    # 修改文件创建掩码
+    os.umask(0)
+    
+    # 第二次fork，确保进程不会再获得控制终端
+    try:
+        if os.fork() > 0:
+            sys.exit(0)  # 父进程退出
+    except OSError as e:
+        print(f"第二次fork失败: {e}")
+        sys.exit(1)
+    
+    # 重定向标准输入输出和错误
+    sys.stdout.flush()
+    sys.stderr.flush()
+    
+    # 创建PID文件
+    pid = str(os.getpid())
+    pid_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'glitch.pid')
+    
+    with open(pid_file, 'w') as f:
+        f.write(pid)
+    
+    # 注册退出函数，删除PID文件
+    def cleanup():
+        try:
+            os.remove(pid_file)
+        except:
+            pass
+    
+    atexit.register(cleanup)
+    
+    # 重定向标准输入输出到/dev/null
+    with open(os.devnull, 'r') as f:
+        os.dup2(f.fileno(), sys.stdin.fileno())
+    
+    log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'glitch.log')
+    with open(log_file, 'a+') as f:
+        os.dup2(f.fileno(), sys.stdout.fileno())
+        os.dup2(f.fileno(), sys.stderr.fileno())
+    
+    print(f"\n{datetime.now()} - 守护进程已启动，PID: {pid}")
+
 def run_in_background(args):
     """在后台运行脚本"""
-    # 构建命令行参数，排除--background选项
-    cmd = [sys.executable, sys.argv[0]]
+    print("正在启动后台进程...")
     
-    if args.url != DEFAULT_URL:
-        cmd.extend(['--url', args.url])
+    # 检查PID文件是否存在
+    pid_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'glitch.pid')
+    if os.path.exists(pid_file):
+        with open(pid_file, 'r') as f:
+            pid = f.read().strip()
+            try:
+                # 检查进程是否存在
+                os.kill(int(pid), 0)
+                print(f"脚本已经在后台运行，PID: {pid}")
+                print("如果要重新启动，请先停止现有进程:")
+                print(f"{sys.executable} {sys.argv[0]} --stop")
+                return
+            except OSError:
+                # 进程不存在，删除过期的PID文件
+                os.remove(pid_file)
     
-    if args.interval != "60-240":
-        cmd.extend(['--interval', args.interval])
+    # 将当前进程转变为守护进程
+    daemonize()
     
-    if args.verbose:
-        cmd.append('--verbose')
+    # 设置日志
+    log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'glitch.log')
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    logger.addHandler(file_handler)
+    logger.removeHandler(logger.handlers[0])  # 移除控制台处理器
     
-    # 使用nohup在后台运行
-    log_file = "glitch.log"
-    nohup_cmd = ['nohup'] + cmd + ['>', log_file, '2>&1', '&']
-    
+    # 运行主循环
     try:
-        # 使用shell=True来执行命令，因为我们需要使用重定向符号
-        subprocess.run(' '.join(nohup_cmd), shell=True)
-        print(f"脚本已在后台启动，日志输出到 {log_file}")
-        print("可以使用以下命令查看日志:")
-        print(f"tail -f {log_file}")
-        print("\n要停止脚本，请运行:")
-        print(f"{sys.executable} {sys.argv[0]} --stop")
+        run_main_loop(args)
     except Exception as e:
-        print(f"启动后台进程时出错: {e}")
+        logger.error(f"后台进程出错: {e}")
+        sys.exit(1)
 
 def stop_background_processes():
-    """停止所有后台运行的脚本实例"""
+    """停止后台运行的脚本实例"""
+    pid_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'glitch.pid')
+    if not os.path.exists(pid_file):
+        print("没有找到正在运行的脚本实例")
+        return
+    
     try:
-        # 获取脚本名称
-        script_name = os.path.basename(sys.argv[0])
+        with open(pid_file, 'r') as f:
+            pid = int(f.read().strip())
         
-        # 使用ps和grep查找运行中的实例
-        ps_cmd = f"ps aux | grep '{script_name}' | grep -v grep | grep -v stop"
-        ps_output = subprocess.check_output(ps_cmd, shell=True, text=True)
-        
-        if not ps_output.strip():
-            print("没有找到正在运行的脚本实例")
-            return
-        
-        # 提取进程ID
-        pids = []
-        for line in ps_output.splitlines():
-            parts = line.split()
-            if len(parts) > 1:
-                pids.append(parts[1])
-        
-        if not pids:
-            print("没有找到正在运行的脚本实例")
-            return
-        
-        # 终止进程
-        for pid in pids:
+        # 尝试终止进程
+        try:
+            os.kill(pid, 15)  # SIGTERM
+            print(f"已发送终止信号到进程 {pid}")
+            
+            # 等待进程终止
+            for _ in range(10):
+                try:
+                    os.kill(pid, 0)
+                    time.sleep(0.5)
+                except OSError:
+                    break
+            
+            # 如果进程仍然存在，强制终止
             try:
-                subprocess.run(['kill', pid])
-                print(f"已终止进程ID: {pid}")
-            except Exception as e:
-                print(f"终止进程 {pid} 时出错: {e}")
+                os.kill(pid, 0)
+                os.kill(pid, 9)  # SIGKILL
+                print(f"进程 {pid} 未响应，已强制终止")
+            except OSError:
+                pass
+            
+            print(f"已停止脚本实例，PID: {pid}")
+        except OSError:
+            print(f"进程 {pid} 不存在")
         
-        print(f"已停止 {len(pids)} 个脚本实例")
+        # 删除PID文件
+        os.remove(pid_file)
     except Exception as e:
-        print(f"停止后台进程时出错: {e}")
+        print(f"停止进程时出错: {e}")
 
 def list_background_processes():
-    """列出所有正在运行的脚本实例"""
+    """列出后台运行的脚本实例"""
+    pid_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'glitch.pid')
+    if not os.path.exists(pid_file):
+        print("没有找到正在运行的脚本实例")
+        return
+    
     try:
-        # 获取脚本名称
-        script_name = os.path.basename(sys.argv[0])
+        with open(pid_file, 'r') as f:
+            pid = f.read().strip()
         
-        # 使用ps和grep查找运行中的实例
-        ps_cmd = f"ps aux | grep '{script_name}' | grep -v grep | grep -v list"
-        ps_output = subprocess.check_output(ps_cmd, shell=True, text=True)
-        
-        if not ps_output.strip():
-            print("没有找到正在运行的脚本实例")
-            return
-        
-        print("正在运行的脚本实例:")
-        print("PID\t用户\t启动时间\t\t命令")
-        print("-" * 80)
-        
-        for line in ps_output.splitlines():
-            parts = line.split()
-            if len(parts) > 9:
-                pid = parts[1]
-                user = parts[0]
-                start_time = f"{parts[9]}"
-                cmd = ' '.join(parts[10:])
-                print(f"{pid}\t{user}\t{start_time}\t{cmd}")
+        # 检查进程是否存在
+        try:
+            os.kill(int(pid), 0)
+            print(f"脚本正在后台运行，PID: {pid}")
+            
+            # 显示日志文件位置
+            log_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'glitch.log')
+            if os.path.exists(log_file):
+                print(f"日志文件: {log_file}")
+                print("查看日志: tail -f " + log_file)
+        except OSError:
+            print(f"PID文件存在，但进程 {pid} 不存在")
+            os.remove(pid_file)
     except Exception as e:
-        print(f"列出后台进程时出错: {e}")
+        print(f"检查进程状态时出错: {e}")
 
-# 主循环，以随机间隔发送请求
-def main():
-    # 解析命令行参数
-    args = parse_arguments()
-    
-    # 处理停止命令
-    if args.stop:
-        stop_background_processes()
-        return
-        
-    # 处理列出进程命令
-    if args.list:
-        list_background_processes()
-        return
-    
-    # 处理后台运行命令
-    if args.background:
-        run_in_background(args)
-        return
-    
+def run_main_loop(args):
+    """运行主循环"""
     # 设置目标URL
     target_url = args.url
-    
-    # 处理删除操作
-    if args.delete:
-        count = session_manager.delete_url_sessions(target_url)
-        logger.info(f"已删除URL {target_url} 的 {count} 个会话记录")
-        return
-        
-    # 处理清除所有操作
-    if args.clear_all:
-        session_manager.clear_all_sessions()
-        logger.info("已清除所有会话记录")
-        return
     
     # 解析时间间隔
     try:
@@ -678,6 +719,41 @@ def main():
         logger.info("程序被用户中断")
     except Exception as e:
         logger.error(f"程序出错: {e}")
+
+# 主循环，以随机间隔发送请求
+def main():
+    # 解析命令行参数
+    args = parse_arguments()
+    
+    # 处理停止命令
+    if args.stop:
+        stop_background_processes()
+        return
+        
+    # 处理列出进程命令
+    if args.list:
+        list_background_processes()
+        return
+    
+    # 处理后台运行命令
+    if args.background:
+        run_in_background(args)
+        return
+    
+    # 处理删除操作
+    if args.delete:
+        count = session_manager.delete_url_sessions(args.url)
+        logger.info(f"已删除URL {args.url} 的 {count} 个会话记录")
+        return
+        
+    # 处理清除所有操作
+    if args.clear_all:
+        session_manager.clear_all_sessions()
+        logger.info("已清除所有会话记录")
+        return
+    
+    # 运行主循环
+    run_main_loop(args)
         
 if __name__ == "__main__":
     main()
