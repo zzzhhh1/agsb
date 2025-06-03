@@ -115,6 +115,167 @@ python3 agsb.py
 
 ---
 
+# Glitch 网站保活脚本
+
+## 简介
+
+这是一个用于保持 Glitch 项目在线的脚本，通过模拟真人浏览行为定期访问指定网站，防止 Glitch 项目因长时间无访问而休眠。脚本模拟真实用户访问行为，支持多种浏览器和设备的 User-Agent，自动处理缓存和 ETag，减少服务器负担。
+
+## 主要功能
+
+- 模拟真人浏览行为，防止被识别为机器人
+- 支持自定义访问间隔时间
+- 智能会话管理，模拟真实用户访问模式
+- 支持多种浏览器和设备的 User-Agent
+- 自动处理缓存和 ETag，减少服务器负担
+- 完整的日志记录功能
+- 支持通过命令行参数自定义配置
+
+## 安装与使用
+
+### 安装依赖
+
+脚本仅依赖 Python 标准库和 `requests` 库：
+
+```bash
+pip install requests
+```
+
+### 使用 curl 一键安装并运行
+
+```bash
+# 下载并运行（默认URL）
+curl -fsSL https://raw.githubusercontent.com/zhumengkang/agsb/main/cron-glitch.py | python3 -
+
+# 下载并指定URL运行
+curl -fsSL https://raw.githubusercontent.com/zhumengkang/agsb/main/cron-glitch.py | python3 - -u https://your-project-name.glitch.me
+
+# 下载并指定URL和访问间隔
+curl -fsSL https://raw.githubusercontent.com/zhumengkang/agsb/main/cron-glitch.py | python3 - --url https://your-project-name.glitch.me --interval 30-180
+```
+
+### 使用 wget 下载并运行
+
+```bash
+# 下载脚本
+wget https://raw.githubusercontent.com/zhumengkang/agsb/main/cron-glitch.py -O glitch.py
+
+# 运行脚本（默认URL）
+python3 glitch.py
+
+# 指定URL运行
+python3 glitch.py -u https://your-project-name.glitch.me
+
+# 指定URL和访问间隔
+python3 glitch.py --url https://your-project-name.glitch.me --interval 30-180
+```
+
+### 基本用法
+
+```bash
+python glitch.py
+```
+
+这将使用默认设置（访问 https://seemly-organized-thing.glitch.me/ 网站，每 1-4 分钟访问一次）。
+
+### 指定目标 URL
+
+```bash
+python glitch.py -u https://your-project-name.glitch.me
+```
+
+或者
+
+```bash
+python glitch.py --url https://your-project-name.glitch.me
+```
+
+### 自定义访问间隔
+
+```bash
+python glitch.py -i 30-180
+```
+
+这会将访问间隔设置为 30-180 秒（格式为"最小值-最大值"）。
+
+### 删除特定 URL 的会话记录
+
+```bash
+python glitch.py -u https://your-project-name.glitch.me -d
+```
+
+或者
+
+```bash
+python glitch.py --url https://your-project-name.glitch.me --delete
+```
+
+### 清除所有会话记录
+
+```bash
+python glitch.py -c
+```
+
+或者
+
+```bash
+python glitch.py --clear-all
+```
+
+### 显示详细日志
+
+```bash
+python glitch.py -v
+```
+
+或者
+
+```bash
+python glitch.py --verbose
+```
+
+## 参数说明
+
+| 参数 | 长参数 | 描述 |
+|------|--------|------|
+| `-u URL` | `--url URL` | 要访问的目标 URL（默认: https://seemly-organized-thing.glitch.me/） |
+| `-i INTERVAL` | `--interval INTERVAL` | 请求间隔范围(秒)，格式为"最小值-最大值"（默认: "60-240"） |
+| `-v` | `--verbose` | 显示详细日志 |
+| `-d` | `--delete` | 删除指定 URL 的会话记录和 Cookie |
+| `-c` | `--clear-all` | 清除所有会话记录和 Cookie |
+
+## 工作原理
+
+1. 脚本会在指定的时间间隔内随机选择一个时间点发送请求
+2. 每次请求都会使用不同的浏览器指纹信息，模拟真实用户
+3. 会话管理系统会保持 Cookie 和会话状态，模拟用户持续访问
+4. 支持 ETag 缓存机制，减少服务器负担
+5. 模拟人类浏览行为，如滚动、点击等
+
+## 注意事项
+
+- 脚本会在当前目录创建 `cookies` 文件夹存储会话信息
+- 日志会同时输出到控制台和 `requests.log` 文件
+- 为避免 Glitch 项目休眠，建议将访问间隔设置在 5 分钟以内
+- 使用 Ctrl+C 可以随时中断脚本运行
+
+## 在后台运行
+
+如果您想在后台运行脚本，可以使用以下命令：
+
+```bash
+# 使用nohup在后台运行
+nohup python3 glitch.py -u https://your-project-name.glitch.me > glitch.log 2>&1 &
+
+# 查看后台运行的进程
+ps aux | grep glitch.py
+
+# 停止运行
+kill $(ps aux | grep 'glitch.py' | grep -v grep | awk '{print $2}')
+```
+
+---
+
 # Ubuntu Proot 环境安装脚本
 
 在某些环境中，您可能需要一个完整的Ubuntu环境来运行上述ArgoSB脚本。以下是一个无需root权限的Ubuntu Proot环境安装脚本，可以帮助您在任何支持的系统上快速创建一个Ubuntu环境。
