@@ -153,11 +153,11 @@ curl -fsSL https://raw.githubusercontent.com/zhumengkang/agsb/main/cron-glitch.p
 # 下载并指定URL和访问间隔
 curl -fsSL https://raw.githubusercontent.com/zhumengkang/agsb/main/cron-glitch.py | python3 - --url https://your-project-name.glitch.me --interval 30-180
 
-# 一键下载并在后台运行（默认URL）
-curl -fsSL https://raw.githubusercontent.com/zhumengkang/agsb/main/cron-glitch.py -o glitch.py && nohup python3 glitch.py > glitch.log 2>&1 &
+# 一键下载并在后台运行（默认URL）- 使用脚本内置后台功能
+curl -fsSL https://raw.githubusercontent.com/zhumengkang/agsb/main/cron-glitch.py -o glitch.py && python3 glitch.py -b
 
-# 一键下载并在后台运行（指定URL）
-curl -fsSL https://raw.githubusercontent.com/zhumengkang/agsb/main/cron-glitch.py -o glitch.py && nohup python3 glitch.py -u https://your-project-name.glitch.me > glitch.log 2>&1 &
+# 一键下载并在后台运行（指定URL）- 使用脚本内置后台功能
+curl -fsSL https://raw.githubusercontent.com/zhumengkang/agsb/main/cron-glitch.py -o glitch.py && python3 glitch.py -b -u https://your-project-name.glitch.me
 
 # 查看日志
 tail -f glitch.log
@@ -178,11 +178,11 @@ python3 glitch.py -u https://your-project-name.glitch.me
 # 指定URL和访问间隔
 python3 glitch.py --url https://your-project-name.glitch.me --interval 30-180
 
-# 一键下载并在后台运行（默认URL）
-wget https://raw.githubusercontent.com/zhumengkang/agsb/main/cron-glitch.py -O glitch.py && nohup python3 glitch.py > glitch.log 2>&1 &
+# 一键下载并在后台运行（默认URL）- 使用脚本内置后台功能
+wget https://raw.githubusercontent.com/zhumengkang/agsb/main/cron-glitch.py -O glitch.py && python3 glitch.py -b
 
-# 一键下载并在后台运行（指定URL）
-wget https://raw.githubusercontent.com/zhumengkang/agsb/main/cron-glitch.py -O glitch.py && nohup python3 glitch.py -u https://your-project-name.glitch.me > glitch.log 2>&1 &
+# 一键下载并在后台运行（指定URL）- 使用脚本内置后台功能
+wget https://raw.githubusercontent.com/zhumengkang/agsb/main/cron-glitch.py -O glitch.py && python3 glitch.py -b -u https://your-project-name.glitch.me
 
 # 查看日志
 tail -f glitch.log
@@ -279,7 +279,7 @@ python glitch.py --verbose
 
 ## 在后台运行
 
-脚本提供了便捷的后台运行功能，可以让脚本在终端关闭后继续运行。
+脚本提供了内置的后台运行功能，可以让脚本在终端关闭后继续运行。**不依赖外部的nohup命令**，在各种环境下都能正常工作，包括Glitch平台。
 
 ### 使用内置后台功能
 
@@ -322,21 +322,6 @@ cat glitch.log
 
 # 实时查看日志更新
 tail -f glitch.log
-```
-
-### 使用nohup手动运行
-
-如果您想手动使用nohup命令，也可以使用以下方式：
-
-```bash
-# 使用nohup在后台运行
-nohup python3 glitch.py -u https://your-project-name.glitch.me > glitch.log 2>&1 &
-
-# 查看后台运行的进程
-ps aux | grep glitch.py
-
-# 停止运行
-kill $(ps aux | grep 'glitch.py' | grep -v grep | awk '{print $2}')
 ```
 
 ---
