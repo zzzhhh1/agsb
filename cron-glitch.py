@@ -7,11 +7,8 @@ import uuid
 import platform
 import json
 import os
-import argparse
 import sys
-import shutil
-import subprocess
-import atexit
+import signal
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
@@ -23,30 +20,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# 默认目标URL
+# 定义默认URL
 DEFAULT_URL = "https://seemly-organized-thing.glitch.me/"
-
-# 解析命令行参数
-def parse_arguments():
-    parser = argparse.ArgumentParser(description='模拟真人访问网站，防止Glitch休眠')
-    parser.add_argument('-u', '--url', type=str, default=DEFAULT_URL,
-                        help=f'要访问的目标URL (默认: {DEFAULT_URL})')
-    parser.add_argument('-i', '--interval', type=str, default="60-240",
-                        help='请求间隔范围(秒)，格式为"最小值-最大值" (默认: "60-240")')
-    parser.add_argument('-v', '--verbose', action='store_true',
-                        help='显示详细日志')
-    parser.add_argument('-d', '--delete', action='store_true',
-                        help='删除指定URL的会话记录和Cookie')
-    parser.add_argument('-c', '--clear-all', action='store_true',
-                        help='清除所有会话记录和Cookie')
-    parser.add_argument('-b', '--background', action='store_true',
-                        help='在后台运行脚本(使用nohup)')
-    parser.add_argument('-s', '--stop', action='store_true',
-                        help='停止所有后台运行的脚本实例')
-    parser.add_argument('-l', '--list', action='store_true',
-                        help='列出所有正在运行的脚本实例')
-    
-    return parser.parse_args()
+URL = DEFAULT_URL
 
 # 创建cookies目录
 COOKIES_DIR = "cookies"
@@ -70,8 +46,8 @@ class SessionManager:
                 try:
                     with open(os.path.join(COOKIES_DIR, file), 'r') as f:
                         data = json.load(f)
-                        cookies = data.get('cookies', [])
-                        url = data.get('url', '')
+                        cookies = data.get('cookies', []) if isinstance(data, dict) else data
+                        url = data.get('url', '') if isinstance(data, dict) else ''
                         
                         session = requests.Session()
                         for cookie in cookies:
@@ -191,42 +167,6 @@ class SessionManager:
                 
             logger.info(f"创建新会话: {session_id}")
             return session_id, session
-            
-    def delete_url_sessions(self, url):
-        """删除指定URL的所有会话"""
-        if url not in self.url_sessions:
-            logger.info(f"没有找到URL {url} 的会话")
-            return 0
-            
-        count = 0
-        for session_id in self.url_sessions[url][:]:  # 使用副本进行迭代
-            if session_id in self.sessions:
-                del self.sessions[session_id]
-                
-                # 删除对应的cookie文件
-                cookie_file = os.path.join(COOKIES_DIR, f"{session_id}.json")
-                if os.path.exists(cookie_file):
-                    os.remove(cookie_file)
-                    count += 1
-                    
-        # 清除URL映射
-        del self.url_sessions[url]
-        logger.info(f"已删除URL {url} 的 {count} 个会话")
-        return count
-        
-    def clear_all_sessions(self):
-        """清除所有会话和cookie"""
-        # 清空会话字典
-        self.sessions.clear()
-        self.url_sessions.clear()
-        
-        # 删除cookies目录下的所有文件
-        if os.path.exists(COOKIES_DIR):
-            for file in os.listdir(COOKIES_DIR):
-                if file.endswith('.json'):
-                    os.remove(os.path.join(COOKIES_DIR, file))
-                    
-        logger.info("已清除所有会话和Cookie")
 
 # 初始化会话管理器
 session_manager = SessionManager()
@@ -438,13 +378,13 @@ def simulate_human_behavior():
                 
             time.sleep(duration)
 
-def send_request(url):
+def send_request():
     """发送请求并模拟真人行为"""
     global etag
     headers = get_headers()
     
     # 获取会话
-    session_id, session = session_manager.get_session(headers['user-agent'], headers, url)
+    session_id, session = session_manager.get_session(headers['user-agent'], headers, URL)
     
     # 如果有ETag，添加到请求头中
     if etag and random.random() < 0.9:  # 90%的概率使用缓存
@@ -466,7 +406,7 @@ def send_request(url):
         start_time = time.time()
         
         # 发送请求
-        response = session.get(url, headers=headers, timeout=10)
+        response = session.get(URL, headers=headers, timeout=10)
         
         # 计算请求时间
         request_time = time.time() - start_time
@@ -476,10 +416,10 @@ def send_request(url):
             etag = response.headers['etag']
         
         # 保存会话cookies
-        session_manager.save_cookies(session_id, url)
+        session_manager.save_cookies(session_id, URL)
         
         # 记录请求信息
-        logger.info(f"请求发送到 {url}")
+        logger.info(f"请求发送到 {URL}")
         logger.info(f"会话ID: {session_id}")
         logger.info(f"状态码: {response.status_code}")
         logger.info(f"响应时间: {request_time:.2f}秒")
@@ -505,250 +445,71 @@ def send_request(url):
     except Exception as e:
         logger.error(f"发送请求时出错: {e}")
 
-def daemonize():
-    """
-    将当前进程转变为守护进程
-    """
-    # 第一次fork，让shell认为进程结束
-    try:
-        if os.fork() > 0:
-            sys.exit(0)  # 父进程退出
-    except OSError as e:
-        print(f"第一次fork失败: {e}")
-        sys.exit(1)
+# 后台运行相关函数
+def run_in_background():
+    """将进程放入后台运行"""
+    # 创建PID文件
+    pid = os.getpid()
+    with open('glitch.pid', 'w') as f:
+        f.write(str(pid))
     
-    # 修改工作目录 - 使用当前目录而不是根目录
-    current_dir = os.path.dirname(os.path.abspath(__file__))
-    if current_dir:  # 如果能获取到当前目录
-        os.chdir(current_dir)
+    # 设置日志输出到文件
+    for handler in logger.handlers[:]:
+        logger.removeHandler(handler)
     
-    # 创建新的会话，脱离控制终端
-    os.setsid()
+    file_handler = logging.FileHandler('glitch.log')
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+    logger.addHandler(file_handler)
     
-    # 修改文件创建掩码
-    os.umask(0)
+    logger.info(f"进程已在后台运行，PID: {pid}")
     
-    # 第二次fork，确保进程不会再获得控制终端
-    try:
-        if os.fork() > 0:
-            sys.exit(0)  # 父进程退出
-    except OSError as e:
-        print(f"第二次fork失败: {e}")
-        sys.exit(1)
-    
-    # 重定向标准输入输出和错误
-    sys.stdout.flush()
-    sys.stderr.flush()
-    
-    # 创建PID文件 - 在当前目录下
-    pid = str(os.getpid())
-    pid_file = 'glitch.pid'  # 简化为当前目录下的文件
-    
-    try:
-        with open(pid_file, 'w') as f:
-            f.write(pid)
-    except Exception as e:
-        print(f"无法创建PID文件: {e}")
-        sys.exit(1)
-    
-    # 注册退出函数，删除PID文件
-    def cleanup():
-        try:
-            if os.path.exists(pid_file):
-                os.remove(pid_file)
-        except:
-            pass
-    
-    atexit.register(cleanup)
-    
-    # 重定向标准输入输出到/dev/null
-    try:
-        with open(os.devnull, 'r') as f:
-            os.dup2(f.fileno(), sys.stdin.fileno())
-    except Exception as e:
-        print(f"重定向标准输入失败: {e}")
-    
-    # 重定向输出到日志文件
-    log_file = 'glitch.log'  # 简化为当前目录下的文件
-    try:
-        with open(log_file, 'a+') as f:
-            os.dup2(f.fileno(), sys.stdout.fileno())
-            os.dup2(f.fileno(), sys.stderr.fileno())
-    except Exception as e:
-        print(f"重定向输出到日志文件失败: {e}")
-        sys.exit(1)
-    
-    print(f"\n{datetime.now()} - 守护进程已启动，PID: {pid}")
+    # 忽略终端信号
+    signal.signal(signal.SIGHUP, signal.SIG_IGN)
 
-def run_in_background(args):
-    """在后台运行脚本"""
-    print("正在启动后台进程...")
+# 主循环，以随机间隔发送请求
+def main():
+    global URL
     
-    # 检查PID文件是否存在
-    pid_file = 'glitch.pid'  # 简化为当前目录下的文件
-    if os.path.exists(pid_file):
-        try:
-            with open(pid_file, 'r') as f:
-                pid = f.read().strip()
-                try:
-                    # 检查进程是否存在
-                    os.kill(int(pid), 0)
-                    print(f"脚本已经在后台运行，PID: {pid}")
-                    print("如果要重新启动，请先停止现有进程:")
-                    print(f"{sys.executable} {sys.argv[0]} --stop")
-                    return
-                except OSError:
-                    # 进程不存在，删除过期的PID文件
-                    os.remove(pid_file)
-        except Exception as e:
-            print(f"读取PID文件时出错: {e}")
-            # 尝试删除可能损坏的PID文件
-            try:
-                os.remove(pid_file)
-            except:
-                pass
+    # 解析命令行参数
+    background = False
     
-    # 将当前进程转变为守护进程
-    try:
-        daemonize()
-    except Exception as e:
-        print(f"启动守护进程失败: {e}")
-        sys.exit(1)
-    
-    # 设置日志
-    log_file = 'glitch.log'  # 简化为当前目录下的文件
-    try:
-        file_handler = logging.FileHandler(log_file)
-        file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
-        logger.addHandler(file_handler)
+    # 简单的参数解析
+    i = 1
+    while i < len(sys.argv):
+        arg = sys.argv[i]
         
-        # 移除控制台处理器
-        if logger.handlers and len(logger.handlers) > 0:
-            logger.removeHandler(logger.handlers[0])
-    except Exception as e:
-        print(f"设置日志失败: {e}")
+        if arg == '-u' or arg == '--url':
+            if i + 1 < len(sys.argv):
+                URL = sys.argv[i + 1]
+                i += 2
+            else:
+                print("错误: URL参数需要一个值")
+                sys.exit(1)
+        elif arg == '-b' or arg == '--background':
+            background = True
+            i += 1
+        else:
+            i += 1
     
-    # 运行主循环
-    try:
-        run_main_loop(args)
-    except Exception as e:
-        logger.error(f"后台进程出错: {e}")
-        sys.exit(1)
-
-def stop_background_processes():
-    """停止后台运行的脚本实例"""
-    pid_file = 'glitch.pid'  # 简化为当前目录下的文件
-    if not os.path.exists(pid_file):
-        print("没有找到正在运行的脚本实例")
-        return
-    
-    try:
-        with open(pid_file, 'r') as f:
-            pid = int(f.read().strip())
-        
-        # 尝试终止进程
-        try:
-            os.kill(pid, 15)  # SIGTERM
-            print(f"已发送终止信号到进程 {pid}")
-            
-            # 等待进程终止
-            for _ in range(10):
-                try:
-                    os.kill(pid, 0)
-                    time.sleep(0.5)
-                except OSError:
-                    break
-            
-            # 如果进程仍然存在，强制终止
-            try:
-                os.kill(pid, 0)
-                os.kill(pid, 9)  # SIGKILL
-                print(f"进程 {pid} 未响应，已强制终止")
-            except OSError:
-                pass
-            
-            print(f"已停止脚本实例，PID: {pid}")
-        except OSError:
-            print(f"进程 {pid} 不存在")
-        
-        # 删除PID文件
-        if os.path.exists(pid_file):
-            os.remove(pid_file)
-    except Exception as e:
-        print(f"停止进程时出错: {e}")
-        # 尝试删除可能损坏的PID文件
-        try:
-            if os.path.exists(pid_file):
-                os.remove(pid_file)
-        except:
-            pass
-
-def list_background_processes():
-    """列出后台运行的脚本实例"""
-    pid_file = 'glitch.pid'  # 简化为当前目录下的文件
-    if not os.path.exists(pid_file):
-        print("没有找到正在运行的脚本实例")
-        return
-    
-    try:
-        with open(pid_file, 'r') as f:
-            pid = f.read().strip()
-        
-        # 检查进程是否存在
-        try:
-            os.kill(int(pid), 0)
-            print(f"脚本正在后台运行，PID: {pid}")
-            
-            # 显示日志文件位置
-            log_file = 'glitch.log'  # 简化为当前目录下的文件
-            if os.path.exists(log_file):
-                print(f"日志文件: {log_file}")
-                print("查看日志: tail -f " + log_file)
-        except OSError:
-            print(f"PID文件存在，但进程 {pid} 不存在")
-            os.remove(pid_file)
-    except Exception as e:
-        print(f"检查进程状态时出错: {e}")
-        # 尝试删除可能损坏的PID文件
-        try:
-            os.remove(pid_file)
-        except:
-            pass
-
-def run_main_loop(args):
-    """运行主循环"""
-    # 设置目标URL
-    target_url = args.url
-    
-    # 解析时间间隔
-    try:
-        min_interval, max_interval = map(int, args.interval.split('-'))
-        if min_interval < 1:
-            min_interval = 1
-        if max_interval < min_interval:
-            max_interval = min_interval + 60
-    except:
-        logger.warning("间隔格式无效，使用默认值 60-240 秒")
-        min_interval, max_interval = 60, 240
-    
-    # 设置日志级别
-    if args.verbose:
-        logger.setLevel(logging.DEBUG)
-    
-    logger.info(f"开始运行脚本，模拟真人访问...")
-    logger.info(f"目标URL: {target_url}")
-    logger.info(f"请求间隔: {min_interval}-{max_interval} 秒")
+    # 如果指定后台运行
+    if background:
+        print(f"正在后台启动，访问URL: {URL}")
+        print("日志将写入 glitch.log 文件")
+        run_in_background()
+    else:
+        logger.info("开始运行脚本，模拟真人访问...")
+        logger.info(f"目标URL: {URL}")
     
     try:
         while True:
             # 确保每1-4分钟发送一次请求，防止Glitch休眠
-            # 60%的概率在较短时间内请求
-            # 40%的概率在较长时间内请求
+            # 60%的概率在1-3分钟之间
+            # 40%的概率在3-4分钟之间
             rand = random.random()
             if rand < 0.6:  # 60%的概率
-                wait_time = random.randint(min_interval, (min_interval + max_interval) // 2)
+                wait_time = random.randint(60, 180)  # 1-3分钟
             else:  # 40%的概率
-                wait_time = random.randint((min_interval + max_interval) // 2, max_interval)
+                wait_time = random.randint(180, 240)  # 3-4分钟
                 
             current_time = datetime.now().strftime("%H:%M:%S")
             logger.info(f"当前时间: {current_time}, 等待 {wait_time} 秒...")
@@ -758,47 +519,12 @@ def run_main_loop(args):
             actual_wait = max(1, wait_time + jitter)
             time.sleep(actual_wait)
             
-            send_request(target_url)
+            send_request()
             
     except KeyboardInterrupt:
         logger.info("程序被用户中断")
     except Exception as e:
         logger.error(f"程序出错: {e}")
-
-# 主循环，以随机间隔发送请求
-def main():
-    # 解析命令行参数
-    args = parse_arguments()
-    
-    # 处理停止命令
-    if args.stop:
-        stop_background_processes()
-        return
-        
-    # 处理列出进程命令
-    if args.list:
-        list_background_processes()
-        return
-    
-    # 处理后台运行命令
-    if args.background:
-        run_in_background(args)
-        return
-    
-    # 处理删除操作
-    if args.delete:
-        count = session_manager.delete_url_sessions(args.url)
-        logger.info(f"已删除URL {args.url} 的 {count} 个会话记录")
-        return
-        
-    # 处理清除所有操作
-    if args.clear_all:
-        session_manager.clear_all_sessions()
-        logger.info("已清除所有会话记录")
-        return
-    
-    # 运行主循环
-    run_main_loop(args)
         
 if __name__ == "__main__":
     main()
