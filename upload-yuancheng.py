@@ -57,19 +57,35 @@ class TmateManager:
         """启动tmate并获取会话信息"""
         print("正在启动tmate...")
         try:
-            # 启动tmate进程
+            # 启动tmate进程 - 分离模式，后台运行
             self.tmate_process = subprocess.Popen(
                 [str(self.tmate_path), "-S", "/tmp/tmate.sock", "new-session", "-d"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                start_new_session=True  # 创建新进程组，脱离父进程
             )
             
             # 等待tmate启动
-            time.sleep(3)
+            time.sleep(5)
             
             # 获取会话信息
             self.get_session_info()
-            return True
+            
+            # 验证tmate是否在运行
+            try:
+                result = subprocess.run(
+                    [str(self.tmate_path), "-S", "/tmp/tmate.sock", "list-sessions"],
+                    capture_output=True, text=True, timeout=5
+                )
+                if result.returncode == 0:
+                    print("✓ Tmate后台进程验证成功")
+                    return True
+                else:
+                    print("✗ Tmate后台进程验证失败")
+                    return False
+            except Exception as e:
+                print(f"✗ 验证tmate进程失败: {e}")
+                return False
             
         except Exception as e:
             print(f"✗ 启动tmate失败: {e}")
@@ -212,19 +228,9 @@ class TmateManager:
             return False
     
     def cleanup(self):
-        """清理资源"""
-        if self.tmate_process:
-            try:
-                # 终止tmate会话
-                subprocess.run([str(self.tmate_path), "-S", "/tmp/tmate.sock", "kill-session"], 
-                             capture_output=True, timeout=5)
-                self.tmate_process.terminate()
-                self.tmate_process.wait(timeout=5)
-            except:
-                if self.tmate_process.poll() is None:
-                    self.tmate_process.kill()
-        
-        print("✓ 资源清理完成")
+        """清理资源 - 不终止tmate会话"""
+        # 注意：这里不清理tmate进程，让它在后台继续运行
+        print("✓ Python脚本资源清理完成（tmate会话保持运行）")
 
 def signal_handler(signum, frame):
     """信号处理器"""
@@ -266,22 +272,21 @@ def main():
             return False
         
         # 4. 上传到API
-        user_name = input("请输入上传文件名（不含扩展名，默认为'tmate_session'）: ").strip()
-        if not user_name:
-            user_name = "tmate_session"
+        user_name = "tmate_session"  # 默认文件名，无需交互
         
         if not manager.upload_to_api(user_name):
             return False
         
         print("\n=== 所有操作完成 ===")
-        print("会话将继续运行，按 Ctrl+C 退出")
+        print("✓ Tmate会话已在后台运行")
+        print(f"✓ 会话信息已保存到: {manager.ssh_info_path}")
+        print(f"✓ 上传URL已保存到: {USER_HOME}/ssh_upload_url.txt")
+        print("\n🎉 脚本执行完成！")
+        print("📍 Tmate会话将继续在后台运行，可以直接使用SSH连接")
+        print("📍 如需停止tmate会话，请执行: pkill -f tmate")
+        print("📍 查看tmate进程状态: ps aux | grep tmate")
         
-        # 保持程序运行
-        try:
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            pass
+        return True
             
     except Exception as e:
         print(f"✗ 程序执行出错: {e}")
