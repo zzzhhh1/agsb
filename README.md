@@ -460,3 +460,5 @@ echo "nameserver 8.8.8.8" >> /etc/resolv.conf
 
 如果您喜欢这个项目，请在GitHub上给我一个Star，或在YouTube上关注我的频道！
 如有问题或建议，欢迎通过GitHub Issues或Telegram群组联系我。
+## 赞助商
+DartNode：https://dartnode.com/
