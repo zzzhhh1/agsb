@@ -240,12 +240,16 @@ def signal_handler(signum, frame):
     sys.exit(0)
 
 def main():
-    # 注册信号处理器
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    
     manager = TmateManager()
-    signal_handler.manager = manager  # 保存引用用于信号处理
+    
+    # 只在主线程中注册信号处理器
+    try:
+        signal.signal(signal.SIGINT, signal_handler)
+        signal.signal(signal.SIGTERM, signal_handler)
+        signal_handler.manager = manager  # 保存引用用于信号处理
+    except ValueError:
+        # 如果不在主线程中（如Streamlit环境），跳过信号处理器注册
+        print("⚠ 检测到非主线程环境，跳过信号处理器注册")
     
     try:
         print("=== Tmate SSH 会话管理器 ===")
