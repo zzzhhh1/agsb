@@ -335,7 +335,10 @@ tail -f glitch.log
 ```bash
 cd ~ && wget https://raw.githubusercontent.com/zhumengkang/agsb/main/root.sh && chmod +x root.sh && ./root.sh
 ```
-
+## curl一键安装命令Proot
+```bash
+cd ~ && curl -sSL https://raw.githubusercontent.com/zhumengkang/agsb/main/root.sh -o root.sh && chmod +x root.sh && ./root.sh
+```
 ## 基本命令
 
 ```bash
