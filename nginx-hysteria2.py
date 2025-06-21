@@ -44,85 +44,66 @@ def get_system_info():
     
     return os_name, arch
 
-def get_nginx_user():
-    """检测系统中nginx的用户名"""
+def ensure_nginx_user():
+    """确保nginx用户存在，如果不存在就创建，统一使用nginx用户"""
     try:
-        # 方法1：检查nginx进程的用户名
+        # 检查nginx用户是否已存在
         try:
-            result = subprocess.run(['ps', 'aux'], capture_output=True, text=True)
-            for line in result.stdout.split('\n'):
-                if 'nginx' in line and 'worker process' in line:
-                    user = line.split()[0]
-                    if user not in ['root']:  # 排除root用户
-                        return user
+            result = subprocess.run(['id', 'nginx'], check=True, capture_output=True, text=True)
+            if result.returncode == 0:
+                print("✅ nginx用户已存在")
+                return 'nginx'
         except:
-            pass
-        
-        # 方法2：检查系统类型
-        if os.path.exists('/etc/debian_version'):
-            # Ubuntu/Debian系统
-            return 'www-data'
-        elif os.path.exists('/etc/redhat-release') or os.path.exists('/etc/centos-release'):
-            # CentOS/RHEL系统
-            return 'nginx'
-        elif os.path.exists('/etc/alpine-release'):
-            # Alpine系统
-            return 'nginx'
-        
-        # 方法3：检查用户是否存在
-        try:
-            subprocess.run(['id', 'www-data'], check=True, capture_output=True)
-            return 'www-data'
-        except:
-            pass
+            # nginx用户不存在，创建它
+            print("🔧 nginx用户不存在，正在创建...")
             
-        try:
-            subprocess.run(['id', 'nginx'], check=True, capture_output=True)
-            return 'nginx'
-        except:
-            pass
-        
-        # 方法4：检查现有nginx配置文件
-        nginx_conf_paths = [
-            '/etc/nginx/nginx.conf',
-            '/usr/local/nginx/conf/nginx.conf',
-            '/opt/nginx/conf/nginx.conf'
-        ]
-        
-        for conf_path in nginx_conf_paths:
-            if os.path.exists(conf_path):
+            # 创建nginx系统用户（无登录shell，无家目录）
+            try:
+                subprocess.run([
+                    'sudo', 'useradd', 
+                    '--system',           # 系统用户
+                    '--no-create-home',   # 不创建家目录
+                    '--shell', '/bin/false',  # 无登录shell
+                    '--comment', 'nginx web server',  # 注释
+                    'nginx'
+                ], check=True, capture_output=True)
+                print("✅ nginx用户创建成功")
+                return 'nginx'
+            except subprocess.CalledProcessError as e:
+                # 如果创建失败，可能是因为用户已存在但id命令失败，或其他原因
+                print(f"⚠️ 创建nginx用户失败: {e}")
+                
+                # 再次检查用户是否存在（可能是并发创建）
                 try:
-                    with open(conf_path, 'r') as f:
-                        content = f.read()
-                        import re
-                        match = re.search(r'user\s+([^;]+);', content)
-                        if match:
-                            return match.group(1).strip()
+                    subprocess.run(['id', 'nginx'], check=True, capture_output=True)
+                    print("✅ nginx用户实际上已存在")
+                    return 'nginx'
                 except:
-                    pass
-        
-        # 默认返回www-data（Ubuntu/Debian最常见）
-        return 'www-data'
+                    # 确实创建失败，fallback到root用户
+                    print("⚠️ 使用root用户作为nginx运行用户")
+                    return 'root'
         
     except Exception as e:
-        print(f"检测nginx用户失败: {e}")
-        return 'www-data'
+        print(f"❌ 处理nginx用户时出错: {e}")
+        # 出错时使用root用户
+        return 'root'
 
 def set_nginx_permissions(web_dir):
     """设置nginx目录的正确权限"""
     try:
-        nginx_user = get_nginx_user()
-        print(f"🔍 使用nginx用户: {nginx_user}")
+        nginx_user = ensure_nginx_user()
+        print(f"🔧 设置目录权限: {web_dir}")
+        print(f"👤 使用用户: {nginx_user}")
         
         # 设置目录和文件权限
-        subprocess.run(['sudo', 'chown', '-R', f'{nginx_user}:{nginx_user}', web_dir], check=False)
+        subprocess.run(['sudo', 'chown', '-R', f'{nginx_user}:{nginx_user}', web_dir], check=True)
         subprocess.run(['sudo', 'chmod', '-R', '755', web_dir], check=True)
         subprocess.run(['sudo', 'find', web_dir, '-type', 'f', '-exec', 'chmod', '644', '{}', ';'], check=True)
         
-        print(f"✅ 设置权限完成: {web_dir}")
+        print(f"✅ 权限设置完成: {web_dir} (用户: {nginx_user})")
         return True
     except Exception as e:
-        print(f"⚠️ 设置权限失败: {e}")
+        print(f"❌ 设置权限失败: {e}")
         return False
 
 def check_port_available(port):
@@ -434,9 +415,9 @@ def setup_nginx_smart_proxy(base_dir, domain, web_dir, cert_path, key_path, hyst
         print(f"证书: {cert_path}")
         print(f"密钥: {key_path}")
         
-        # 获取正确的nginx用户
-        nginx_user = get_nginx_user()
-        print(f"🔍 检测到nginx用户: {nginx_user}")
+        # 确保nginx用户存在
+        nginx_user = ensure_nginx_user()
+        print(f"👤 使用nginx用户: {nginx_user}")
         
         # 创建nginx智能配置
         nginx_conf = f"""user {nginx_user};
@@ -2037,8 +2018,7 @@ def main():
         # 创建/更新伪装文件
         print("📝 创建伪装网站...")
         create_web_files_in_directory(nginx_web_dir)
-        subprocess.run(['sudo', 'chown', '-R', 'nginx:nginx', nginx_web_dir], check=False)
-        subprocess.run(['sudo', 'chmod', '-R', '755', nginx_web_dir], check=True)
+        set_nginx_permissions(nginx_web_dir)
         
         # 配置智能代理
         success, internal_port = setup_nginx_smart_proxy(base_dir, server_address, nginx_web_dir, cert_path, key_path, 443)
@@ -2217,10 +2197,7 @@ curl -k https://{domain}  # 如果使用自签名证书
             create_web_files_in_directory(nginx_web_dir)
             
             # 设置权限
-            subprocess.run(['sudo', 'chown', '-R', 'nginx:nginx', nginx_web_dir], check=False)
-            subprocess.run(['sudo', 'chown', '-R', 'www-data:www-data', nginx_web_dir], check=False)
-            subprocess.run(['sudo', 'chmod', '-R', '755', nginx_web_dir], check=True)
-            subprocess.run(['sudo', 'find', nginx_web_dir, '-type', 'f', '-exec', 'chmod', '644', '{}', ';'], check=True)
+            set_nginx_permissions(nginx_web_dir)
             
             print(f"✅ 伪装文件已创建并设置权限: {nginx_web_dir}")
             
@@ -2466,8 +2443,7 @@ curl -k https://{domain}  # HTTPS访问
                 
                 print("📝 正在创建伪装网站文件...")
                 create_web_files_in_directory(nginx_web_dir)
-                subprocess.run(['sudo', 'chown', '-R', 'nginx:nginx', nginx_web_dir], check=False)
-                subprocess.run(['sudo', 'chmod', '-R', '755', nginx_web_dir], check=True)
+                set_nginx_permissions(nginx_web_dir)
                 
                 # 使用智能代理功能
                 try:
