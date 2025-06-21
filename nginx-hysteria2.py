@@ -44,6 +44,87 @@ def get_system_info():
     
     return os_name, arch
 
+def get_nginx_user():
+    """检测系统中nginx的用户名"""
+    try:
+        # 方法1：检查nginx进程的用户名
+        try:
+            result = subprocess.run(['ps', 'aux'], capture_output=True, text=True)
+            for line in result.stdout.split('\n'):
+                if 'nginx' in line and 'worker process' in line:
+                    user = line.split()[0]
+                    if user not in ['root']:  # 排除root用户
+                        return user
+        except:
+            pass
+        
+        # 方法2：检查系统类型
+        if os.path.exists('/etc/debian_version'):
+            # Ubuntu/Debian系统
+            return 'www-data'
+        elif os.path.exists('/etc/redhat-release') or os.path.exists('/etc/centos-release'):
+            # CentOS/RHEL系统
+            return 'nginx'
+        elif os.path.exists('/etc/alpine-release'):
+            # Alpine系统
+            return 'nginx'
+        
+        # 方法3：检查用户是否存在
+        try:
+            subprocess.run(['id', 'www-data'], check=True, capture_output=True)
+            return 'www-data'
+        except:
+            pass
+            
+        try:
+            subprocess.run(['id', 'nginx'], check=True, capture_output=True)
+            return 'nginx'
+        except:
+            pass
+        
+        # 方法4：检查现有nginx配置文件
+        nginx_conf_paths = [
+            '/etc/nginx/nginx.conf',
+            '/usr/local/nginx/conf/nginx.conf',
+            '/opt/nginx/conf/nginx.conf'
+        ]
+        
+        for conf_path in nginx_conf_paths:
+            if os.path.exists(conf_path):
+                try:
+                    with open(conf_path, 'r') as f:
+                        content = f.read()
+                        import re
+                        match = re.search(r'user\s+([^;]+);', content)
+                        if match:
+                            return match.group(1).strip()
+                except:
+                    pass
+        
+        # 默认返回www-data（Ubuntu/Debian最常见）
+        return 'www-data'
+        
+    except Exception as e:
+        print(f"检测nginx用户失败: {e}")
+        return 'www-data'
+
+def set_nginx_permissions(web_dir):
+    """设置nginx目录的正确权限"""
+    try:
+        nginx_user = get_nginx_user()
+        print(f"🔍 使用nginx用户: {nginx_user}")
+        
+        # 设置目录和文件权限
+        subprocess.run(['sudo', 'chown', '-R', f'{nginx_user}:{nginx_user}', web_dir], check=False)
+        subprocess.run(['sudo', 'chmod', '-R', '755', web_dir], check=True)
+        subprocess.run(['sudo', 'find', web_dir, '-type', 'f', '-exec', 'chmod', '644', '{}', ';'], check=True)
+        
+        print(f"✅ 设置权限完成: {web_dir}")
+        return True
+    except Exception as e:
+        print(f"⚠️ 设置权限失败: {e}")
+        return False
+
 def check_port_available(port):
     """检查端口是否可用（仅使用socket）"""
     try:
@@ -353,8 +434,12 @@ def setup_nginx_smart_proxy(base_dir, domain, web_dir, cert_path, key_path, hyst
         print(f"证书: {cert_path}")
         print(f"密钥: {key_path}")
         
+        # 获取正确的nginx用户
+        nginx_user = get_nginx_user()
+        print(f"🔍 检测到nginx用户: {nginx_user}")
+        
         # 创建nginx智能配置
-        nginx_conf = f"""user nginx;
+        nginx_conf = f"""user {nginx_user};
 worker_processes auto;
 error_log /var/log/nginx/error.log notice;
 pid /run/nginx.pid;
@@ -1500,10 +1585,7 @@ def setup_dual_port_masquerade(base_dir, domain, web_dir, cert_path, key_path):
             create_web_files_in_directory(nginx_web_dir)
         
         # 设置正确的权限
-        subprocess.run(['sudo', 'chown', '-R', 'nginx:nginx', nginx_web_dir], check=False)
-        subprocess.run(['sudo', 'chown', '-R', 'www-data:www-data', nginx_web_dir], check=False)
-        subprocess.run(['sudo', 'chmod', '-R', '755', nginx_web_dir], check=True)
-        subprocess.run(['sudo', 'find', nginx_web_dir, '-type', 'f', '-exec', 'chmod', '644', '{}', ';'], check=True)
+        set_nginx_permissions(nginx_web_dir)
         
         print(f"✅ 设置权限完成: {nginx_web_dir}")
         
@@ -1864,6 +1946,7 @@ proxies:
     tls: true
     skip-cert-verify: {str(not use_real_cert).lower()}
 ```
+
 🎉 优势对比:
 • 传统方式: 客户端UDP → 服务器UDP (容易被检测)
 • 智能代理: 客户端TCP → nginx HTTPS → WebSocket → Hysteria2
