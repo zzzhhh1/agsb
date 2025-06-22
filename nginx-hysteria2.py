@@ -349,29 +349,10 @@ def get_ip_address():
         return '127.0.0.1'
 
 def setup_nginx_smart_proxy(base_dir, domain, web_dir, cert_path, key_path, hysteria_port):
-    """设置nginx智能代理：浏览器访问显示网站，Hysteria2客户端透明转发"""
-    print("🚀 正在配置nginx智能代理（完美伪装方案）...")
+    """设置nginx Web伪装：TCP端口显示正常网站，UDP端口用于Hysteria2"""
+    print("🚀 正在配置nginx Web伪装...")
     
     try:
-        # 修改Hysteria2配置，支持WebSocket传输
-        hysteria_internal_port = 44300
-        
-        config_path = f"{base_dir}/config/config.json"
-        if os.path.exists(config_path):
-            with open(config_path, 'r') as f:
-                config = json.load(f)
-            
-            # 配置Hysteria2使用内部端口和WebSocket
-            config['listen'] = f":{hysteria_internal_port}"
-            config['transport'] = {
-                "type": "ws",
-                "path": "/hy2-tunnel"
-            }
-            
-            with open(config_path, 'w') as f:
-                json.dump(config, f, indent=2)
-            print(f"✅ Hysteria2配置为WebSocket模式: {hysteria_internal_port}")
-        
         # 检查证书文件
         print(f"🔍 检查证书文件路径:")
         print(f"证书文件: {cert_path}")
@@ -379,37 +360,11 @@ def setup_nginx_smart_proxy(base_dir, domain, web_dir, cert_path, key_path, hyst
         
         if not os.path.exists(cert_path):
             print(f"❌ 证书文件不存在: {cert_path}")
-            # 尝试找到证书文件
-            possible_cert_paths = [
-                f"{base_dir}/cert/server.crt",
-                f"{base_dir}/certs/cert.pem", 
-                f"{base_dir}/cert.pem"
-            ]
-            for path in possible_cert_paths:
-                if os.path.exists(path):
-                    cert_path = path
-                    print(f"✅ 找到证书文件: {cert_path}")
-                    break
-            else:
-                print("❌ 未找到任何证书文件，生成新证书...")
-                cert_path, key_path = generate_self_signed_cert(base_dir, domain)
+            cert_path, key_path = generate_self_signed_cert(base_dir, domain)
         
         if not os.path.exists(key_path):
             print(f"❌ 密钥文件不存在: {key_path}")
-            # 尝试找到密钥文件
-            possible_key_paths = [
-                f"{base_dir}/cert/server.key",
-                f"{base_dir}/certs/key.pem",
-                f"{base_dir}/key.pem"
-            ]
-            for path in possible_key_paths:
-                if os.path.exists(path):
-                    key_path = path
-                    print(f"✅ 找到密钥文件: {key_path}")
-                    break
-            else:
-                print("❌ 未找到任何密钥文件，生成新证书...")
-                cert_path, key_path = generate_self_signed_cert(base_dir, domain)
+            cert_path, key_path = generate_self_signed_cert(base_dir, domain)
         
         print(f"📁 最终使用的证书路径:")
         print(f"证书: {cert_path}")
@@ -419,7 +374,7 @@ def setup_nginx_smart_proxy(base_dir, domain, web_dir, cert_path, key_path, hyst
         nginx_user = ensure_nginx_user()
         print(f"👤 使用nginx用户: {nginx_user}")
         
-        # 创建nginx智能配置
+        # 创建nginx标准Web配置
         nginx_conf = f"""user {nginx_user};
 worker_processes auto;
 error_log /var/log/nginx/error.log notice;
@@ -435,10 +390,6 @@ http {{
     sendfile on;
     keepalive_timeout 65;
     server_tokens off;
-    
-    upstream hysteria2_ws {{
-        server 127.0.0.1:{hysteria_internal_port};
-    }}
     
     server {{
         listen 80;
@@ -458,17 +409,6 @@ http {{
             try_files $uri $uri/ /index.html;
         }}
         
-        # Hysteria2 WebSocket隧道
-        location /hy2-tunnel {{
-            proxy_pass http://hysteria2_ws;
-            proxy_http_version 1.1;
-            proxy_set_header Upgrade $http_upgrade;
-            proxy_set_header Connection "upgrade";
-            proxy_set_header Host $host;
-            proxy_cache_bypass $http_upgrade;
-            proxy_read_timeout 86400;
-        }}
-        
         add_header X-Frame-Options DENY always;
         add_header X-Content-Type-Options nosniff always;
     }}
@@ -477,11 +417,6 @@ http {{
         # 更新nginx配置
         print("💾 备份当前nginx配置...")
         subprocess.run(['sudo', 'cp', '/etc/nginx/nginx.conf', '/etc/nginx/nginx.conf.backup'], check=True)
-        
-        print("📝 生成的nginx配置预览:")
-        print("="*50)
-        print(nginx_conf[:500] + "...")
-        print("="*50)
         
         import tempfile
         with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.conf') as tmp:
@@ -498,14 +433,6 @@ http {{
         if test_result.returncode != 0:
             print(f"❌ nginx配置测试失败:")
             print(f"错误信息: {test_result.stderr}")
-            print(f"输出信息: {test_result.stdout}")
-            
-            # 检查证书文件是否存在
-            print(f"🔍 检查证书文件:")
-            print(f"证书文件: {cert_path} - {'存在' if os.path.exists(cert_path) else '不存在'}")
-            print(f"密钥文件: {key_path} - {'存在' if os.path.exists(key_path) else '不存在'}")
-            
-            # 恢复备份
             subprocess.run(['sudo', 'cp', '/etc/nginx/nginx.conf.backup', '/etc/nginx/nginx.conf'], check=True)
             print("🔄 已恢复nginx配置备份")
             return False, None
@@ -517,20 +444,16 @@ http {{
         if restart_result.returncode != 0:
             print(f"❌ nginx重启失败:")
             print(f"错误信息: {restart_result.stderr}")
-            print(f"输出信息: {restart_result.stdout}")
             return False, None
         
-        print("✅ nginx智能代理配置成功！")
-        print("🎯 外界看到：标准HTTPS网站")
-        print("🎯 Hysteria2：通过WebSocket隧道透明传输")
+        print("✅ nginx Web伪装配置成功！")
+        print("🎯 TCP端口: 标准HTTPS网站")
+        print("🎯 UDP端口: Hysteria2代理服务")
         
-        return True, hysteria_internal_port
+        return True, hysteria_port
         
     except Exception as e:
         print(f"❌ 配置失败: {e}")
-        print(f"❌ 详细错误: {str(e)}")
-        import traceback
-        print(f"❌ 错误堆栈: {traceback.format_exc()}")
         return False, None
 
 def create_web_masquerade(base_dir):
@@ -979,8 +902,8 @@ def get_real_certificate(base_dir, domain, email="admin@example.com"):
         print("将使用自签名证书作为备选...")
         return None, None
 
-def create_config(base_dir, port, password, cert_path, key_path, domain, enable_web_masquerade=True, custom_web_dir=None):
-    """创建Hysteria2配置文件（增强防墙版本）"""
+def create_config(base_dir, port, password, cert_path, key_path, domain, enable_web_masquerade=True, custom_web_dir=None, enable_port_hopping=False, obfs_password=None, enable_http3_masquerade=False):
+    """创建Hysteria2配置文件（端口跳跃、混淆、HTTP/3伪装）"""
     
     # 基础配置
     config = {
@@ -994,17 +917,15 @@ def create_config(base_dir, port, password, cert_path, key_path, domain, enable_
             "password": password
         },
         "bandwidth": {
-            # 设置更合理的带宽，避免过高引起注意
             "up": "1000 mbps",
             "down": "1000 mbps"
         },
         "ignoreClientBandwidth": False,
         "log": {
-            "level": "warn",  # 降低日志级别，减少日志量
+            "level": "warn",
             "output": f"{base_dir}/logs/hysteria.log",
             "timestamp": True
         },
-        # 增加流量优化配置
         "resolver": {
             "type": "udp",
             "tcp": {
@@ -1018,9 +939,60 @@ def create_config(base_dir, port, password, cert_path, key_path, domain, enable_
         }
     }
     
-    # 伪装配置优化
-    if enable_web_masquerade and custom_web_dir and os.path.exists(custom_web_dir):
-        # 使用本地Web目录进行伪装
+    # 端口跳跃配置 (Port Hopping)
+    if enable_port_hopping:
+        # Hysteria2服务器端只监听单个端口，端口跳跃通过iptables DNAT实现
+        port_start = max(1024, port - 25)  
+        port_end = min(65535, port + 25)
+        
+        # 确保范围合理：如果基准端口太小，使用固定范围
+        if port < 1049:  # 1024 + 25
+            port_start = 1024
+            port_end = 1074
+        
+        # 服务器仍然只监听单个端口
+        config["listen"] = f":{port}"
+        
+        # 记录端口跳跃信息，用于后续iptables配置
+        config["_port_hopping"] = {
+            "enabled": True,
+            "range_start": port_start,
+            "range_end": port_end,
+            "listen_port": port
+        }
+        
+        print(f"✅ 启用端口跳跃 - 服务器监听: {port}, 客户端可用范围: {port_start}-{port_end}")
+    
+    # 流量混淆配置 (Salamander Obfuscation)
+    if obfs_password:
+        config["obfs"] = {
+            "type": "salamander",
+            "salamander": {
+                "password": obfs_password
+            }
+        }
+        print(f"✅ 启用Salamander混淆 - 密码: {obfs_password}")
+    
+    # HTTP/3伪装配置
+    if enable_http3_masquerade:
+        if enable_web_masquerade and custom_web_dir and os.path.exists(custom_web_dir):
+            config["masquerade"] = {
+                "type": "file",
+                "file": {
+                    "dir": custom_web_dir
+                }
+            }
+        else:
+            # 使用HTTP/3网站伪装
+            config["masquerade"] = {
+                "type": "proxy",
+                "proxy": {
+                    "url": "https://www.google.com",
+                    "rewriteHost": True
+                }
+            }
+        print("✅ 启用HTTP/3伪装 - 流量看起来像正常HTTP/3")
+    elif enable_web_masquerade and custom_web_dir and os.path.exists(custom_web_dir):
         config["masquerade"] = {
             "type": "file",
             "file": {
@@ -1028,7 +1000,6 @@ def create_config(base_dir, port, password, cert_path, key_path, domain, enable_
             }
         }
     elif port in [80, 443, 8080, 8443]:
-        # 对于标准Web端口，使用更逼真的伪装
         config["masquerade"] = {
             "type": "proxy",
             "proxy": {
@@ -1037,7 +1008,6 @@ def create_config(base_dir, port, password, cert_path, key_path, domain, enable_
             }
         }
     else:
-        # 非标准端口使用随机的正常网站伪装
         masquerade_sites = [
             "https://www.microsoft.com",
             "https://www.apple.com", 
@@ -1054,12 +1024,12 @@ def create_config(base_dir, port, password, cert_path, key_path, domain, enable_
             }
         }
     
-    # 如果是标准HTTPS端口，添加HTTP/3支持
+    # QUIC/HTTP3优化配置
     if port == 443:
         config["quic"] = {
             "initStreamReceiveWindow": 8388608,
             "maxStreamReceiveWindow": 8388608,
-            "initConnReceiveWindow": 20971520,
+            "initConnReceiveWindow": 20971520,  
             "maxConnReceiveWindow": 20971520,
             "maxIdleTimeout": "30s",
             "maxIncomingStreams": 1024,
@@ -1154,98 +1124,248 @@ fi
     return script_path
 
 def delete_hysteria2():
-    """删除Hysteria2安装"""
+    """完全删除Hysteria2安装和所有配置"""
     home = get_user_home()
     base_dir = f"{home}/.hysteria2"
     current_user = os.getenv('USER', 'unknown')
     
+    print("🗑️ 开始完全删除Hysteria2和所有相关配置...")
     print(f"当前用户: {current_user}")
     print(f"检查安装目录: {base_dir}")
     
     if not os.path.exists(base_dir):
-        print("当前用户下未找到Hysteria2安装")
+        print("⚠️ 当前用户下未找到Hysteria2安装目录")
         
         # 检查是否有其他用户的hysteria在运行
         try:
             result = subprocess.run(['sudo', 'ss', '-anup'], capture_output=True, text=True)
             if 'hysteria' in result.stdout:
-                print("\n检测到系统中有Hysteria2进程在运行:")
+                print("\n🔍 检测到系统中有Hysteria2进程在运行:")
                 for line in result.stdout.split('\n'):
-                    if 'hysteria' in line and ':443' in line:
+                    if 'hysteria' in line:
                         print(f"  {line}")
                 print("\n如需删除其他用户的安装，请切换到对应用户执行删除操作")
             else:
-                print("系统中未检测到Hysteria2进程")
+                print("✅ 系统中未检测到Hysteria2进程")
         except:
-            print("无法检查系统进程（权限不足）")
-        return
+            print("⚠️ 无法检查系统进程（权限不足）")
+    else:
+        print(f"✅ 找到安装目录: {base_dir}")
     
-    print(f"找到安装目录: {base_dir}")
-    
-    # 停止服务
-    stop_script = f"{base_dir}/stop.sh"
-    if os.path.exists(stop_script):
-        try:
-            print("正在停止Hysteria2服务...")
+    # 1. 停止Hysteria2服务
+    print("\n🛑 步骤1: 停止Hysteria2服务")
+    try:
+        # 尝试使用停止脚本
+        stop_script = f"{base_dir}/stop.sh"
+        if os.path.exists(stop_script):
             subprocess.run([stop_script], check=True)
-            print("✅ 服务已停止")
-        except Exception as e:
-            print(f"⚠️ 停止服务失败: {e}")
-    
-    # 检查是否还有进程在运行
-    try:
-        result = subprocess.run(['sudo', 'ss', '-anup'], capture_output=True, text=True)
-        if 'hysteria' in result.stdout and ':443' in result.stdout:
-            print("⚠️ 检测到Hysteria2进程仍在运行，尝试强制终止...")
-            try:
-                # 尝试找到并终止进程
-                result2 = subprocess.run(['sudo', 'pkill', '-f', 'hysteria'], check=False)
-                print("✅ 进程已终止")
-            except:
-                print("⚠️ 无法终止进程，可能需要手动处理")
-    except:
-        pass
-    
-    # 删除目录
-    try:
-        shutil.rmtree(base_dir)
-        print(f"✅ 已删除安装目录: {base_dir}")
+            print("✅ 使用停止脚本成功停止服务")
         
-        # 清理nginx配置（如果存在）
+        # 强制终止所有hysteria进程
         try:
-            nginx_web_dir = "/var/www/hysteria2"
-            if os.path.exists(nginx_web_dir):
-                subprocess.run(['sudo', 'rm', '-rf', nginx_web_dir], check=True)
-                print(f"✅ 已清理Web目录: {nginx_web_dir}")
+            subprocess.run(['sudo', 'pkill', '-f', 'hysteria'], check=False)
+            print("✅ 强制终止所有hysteria进程")
+        except:
+            pass
+            
+    except Exception as e:
+        print(f"⚠️ 停止服务时出错: {e}")
+    
+    # 2. 清理iptables规则
+    print("\n🔧 步骤2: 清理iptables端口跳跃规则")
+    try:
+        # 读取配置文件获取端口信息
+        config_path = f"{base_dir}/config/config.json"
+        port_ranges = []
+        
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+                listen_port = int(config.get('listen', ':443').replace(':', ''))
                 
-            # 清理nginx配置文件
+                # 计算可能的端口范围
+                port_start = max(1024, listen_port - 25)
+                port_end = min(65535, listen_port + 25)
+                if listen_port < 1049:
+                    port_start = 1024
+                    port_end = 1074
+                
+                port_ranges.append((port_start, port_end, listen_port))
+                print(f"📋 从配置文件读取端口信息: {port_start}-{port_end} → {listen_port}")
+            except:
+                pass
+        
+        # 添加常见端口范围以确保清理完整
+        common_ranges = [
+            (1024, 1074, 443),
+            (28888, 29999, 443),
+            (10000, 10050, 443),
+            (20000, 20050, 443)
+        ]
+        port_ranges.extend(common_ranges)
+        
+        # 清理iptables规则
+        for port_start, port_end, listen_port in port_ranges:
+            try:
+                # 删除NAT规则
+                subprocess.run([
+                    'sudo', 'iptables', '-t', 'nat', '-D', 'PREROUTING',
+                    '-p', 'udp', '--dport', f'{port_start}:{port_end}',
+                    '-j', 'DNAT', '--to-destination', f':{listen_port}'
+                ], check=False, capture_output=True)
+                
+                # 删除INPUT规则
+                subprocess.run([
+                    'sudo', 'iptables', '-D', 'INPUT',
+                    '-p', 'udp', '--dport', f'{port_start}:{port_end}',
+                    '-j', 'ACCEPT'
+                ], check=False, capture_output=True)
+                
+                # 删除单端口规则
+                subprocess.run([
+                    'sudo', 'iptables', '-D', 'INPUT',
+                    '-p', 'udp', '--dport', str(listen_port),
+                    '-j', 'ACCEPT'
+                ], check=False, capture_output=True)
+                
+            except:
+                pass
+        
+        # 保存iptables规则
+        try:
+            subprocess.run(['sudo', 'iptables-save'], check=True, capture_output=True)
+            subprocess.run(['sudo', 'netfilter-persistent', 'save'], check=False, capture_output=True)
+        except:
+            try:
+                subprocess.run(['sudo', 'service', 'iptables', 'save'], check=False, capture_output=True)
+            except:
+                pass
+        
+        print("✅ iptables规则清理完成")
+        
+    except Exception as e:
+        print(f"⚠️ 清理iptables规则失败: {e}")
+    
+    # 3. 清理nginx配置
+    print("\n🌐 步骤3: 清理nginx配置")
+    try:
+        # 清理nginx配置文件
+        nginx_conf_files = [
+            "/etc/nginx/conf.d/hysteria2-ssl.conf",
+            "/etc/nginx/conf.d/hysteria2.conf",
+            "/etc/nginx/sites-enabled/hysteria2",
+            "/etc/nginx/sites-available/hysteria2"
+        ]
+        
+        # 添加基于IP的配置文件
+        try:
             ip_addr = get_ip_address()
-            nginx_conf_files = [
+            nginx_conf_files.extend([
                 f"/etc/nginx/conf.d/{ip_addr}.conf",
                 f"/etc/nginx/sites-enabled/{ip_addr}",
                 f"/etc/nginx/sites-available/{ip_addr}"
-            ]
-            for conf_file in nginx_conf_files:
-                if os.path.exists(conf_file):
+            ])
+        except:
+            pass
+        
+        removed_files = []
+        for conf_file in nginx_conf_files:
+            if os.path.exists(conf_file):
+                try:
                     subprocess.run(['sudo', 'rm', '-f', conf_file], check=True)
-                    print(f"✅ 已清理nginx配置: {conf_file}")
-                    
-            # 重启nginx
-            try:
+                    removed_files.append(conf_file)
+                except:
+                    pass
+        
+        if removed_files:
+            print(f"✅ 已删除nginx配置文件: {', '.join(removed_files)}")
+        
+        # 恢复nginx默认Web目录
+        nginx_web_dirs = ["/var/www/html", "/usr/share/nginx/html"]
+        for web_dir in nginx_web_dirs:
+            if os.path.exists(web_dir):
+                backup_file = f"{web_dir}/index.html.backup"
+                if os.path.exists(backup_file):
+                    try:
+                        subprocess.run(['sudo', 'cp', backup_file, f"{web_dir}/index.html"], check=True)
+                        print(f"✅ 恢复nginx默认页面: {web_dir}")
+                    except:
+                        pass
+        
+        # 测试并重启nginx
+        try:
+            test_result = subprocess.run(['sudo', 'nginx', '-t'], capture_output=True, text=True)
+            if test_result.returncode == 0:
                 subprocess.run(['sudo', 'systemctl', 'reload', 'nginx'], check=True)
-                print("✅ 已重新加载nginx配置")
-            except:
-                print("⚠️ nginx重新加载失败，可能需要手动处理")
-                
-        except Exception as e:
-            print(f"⚠️ 清理nginx配置失败: {e}")
-        
-        print("🎉 Hysteria2 已成功删除")
-        
+                print("✅ nginx配置已重新加载")
+            else:
+                print(f"⚠️ nginx配置测试失败: {test_result.stderr}")
+        except:
+            print("⚠️ nginx重新加载失败")
+            
     except Exception as e:
-        print(f"❌ 删除失败: {e}")
-        print("可能需要sudo权限或手动删除")
-        sys.exit(1)
+        print(f"⚠️ 清理nginx配置失败: {e}")
+    
+    # 4. 删除安装目录
+    print("\n📁 步骤4: 删除安装目录")
+    try:
+        if os.path.exists(base_dir):
+            shutil.rmtree(base_dir)
+            print(f"✅ 已删除安装目录: {base_dir}")
+        else:
+            print("⚠️ 安装目录不存在")
+            
+    except Exception as e:
+        print(f"❌ 删除安装目录失败: {e}")
+    
+    # 5. 清理系统服务（如果存在）
+    print("\n🔧 步骤5: 清理系统服务")
+    try:
+        service_files = [
+            "/etc/systemd/system/hysteria2.service",
+            "/usr/lib/systemd/system/hysteria2.service"
+        ]
+        
+        for service_file in service_files:
+            if os.path.exists(service_file):
+                try:
+                    subprocess.run(['sudo', 'systemctl', 'stop', 'hysteria2'], check=False)
+                    subprocess.run(['sudo', 'systemctl', 'disable', 'hysteria2'], check=False)
+                    subprocess.run(['sudo', 'rm', '-f', service_file], check=True)
+                    print(f"✅ 已删除系统服务: {service_file}")
+                except:
+                    pass
+        
+        # 重新加载systemd
+        try:
+            subprocess.run(['sudo', 'systemctl', 'daemon-reload'], check=True)
+        except:
+            pass
+            
+    except Exception as e:
+        print(f"⚠️ 清理系统服务失败: {e}")
+    
+    print(f"""
+🎉 Hysteria2完全删除完成！
+
+✅ 已清理的内容:
+- Hysteria2服务进程
+- iptables端口跳跃规则
+- nginx配置文件
+- 安装目录: {base_dir}
+- 系统服务文件
+- Web伪装文件
+
+🔧 建议检查:
+- 防火墙规则是否需要调整
+- nginx是否正常运行: sudo systemctl status nginx
+- 系统中是否还有遗留的hysteria进程: ps aux | grep hysteria
+
+现在系统已恢复到安装前的状态！
+""")
+    
+    return True
 
 def show_status():
     """显示Hysteria2状态"""
@@ -1340,18 +1460,18 @@ def start_service(start_script, port, base_dir):
 def show_help():
     """显示帮助信息"""
     print("""
-🛡️ Hysteria2 防墙增强版管理工具
+🛡️ Hysteria2 一键部署工具 (防墙增强版)
+
+重要说明：Hysteria2基于UDP/QUIC协议，支持端口跳跃、混淆和HTTP/3伪装！
 
 使用方法:
     python3 hy2.py [命令] [选项]
 
 可用命令:
-    install      安装 Hysteria2 (防墙增强版，自动配置nginx)
+    install      安装 Hysteria2 (一键部署，自动优化配置)
     client       显示客户端连接指南 (各平台详细说明)
-    fix          修复nginx配置和权限问题 (解决404错误)
-    smart-proxy  智能代理配置（TCP转发，推荐！）
-    setup-nginx  手动设置nginx TCP端口伪装（传统）
-    verify       验证智能代理配置是否正常工作
+    fix          修复nginx配置和权限问题
+    setup-nginx  设置nginx Web伪装
     
     del          删除 Hysteria2
     status       查看 Hysteria2 状态
@@ -1359,7 +1479,7 @@ def show_help():
 
 🔧 基础选项:
     --ip IP           指定服务器IP地址
-    --port PORT       指定服务器端口 (推荐: 443/80)
+    --port PORT       指定服务器端口 (推荐: 443)
     --password PWD    指定密码
 
 🔐 防墙增强选项:
@@ -1368,39 +1488,70 @@ def show_help():
     --use-real-cert         使用真实域名证书 (需域名指向服务器)
     --web-masquerade        启用Web伪装 (默认启用)
     --auto-nginx            自动配置nginx (默认启用)
+
+🚀 高级防墙选项:
+    --simple                🎯 简化一键部署 (端口跳跃+混淆+nginx Web伪装)
+    --port-range RANGE      指定端口跳跃范围 (如: 28888-29999)
+    --enable-bbr            启用BBR拥塞控制算法优化网络性能
+    --port-hopping          启用端口跳跃 (动态切换端口，防封锁)
+    --obfs-password PWD     启用Salamander混淆 (防DPI检测)
+    --http3-masquerade      启用HTTP/3伪装 (流量看起来像正常HTTP/3)
+    --one-click             一键部署 (自动启用所有防墙功能)
     
 
 📋 示例:
-    # 一键安装 (自动配置nginx + Web伪装)
+
+    # 🎯 简化一键部署 (推荐！端口跳跃+混淆+nginx Web伪装)
+    python3 hy2.py install --simple
+
+    # 🔥 高位端口 + BBR优化 (最强性能)
+    python3 hy2.py install --simple --port-range 28888-29999 --enable-bbr
+
+    # 完整一键部署 (自动启用所有防墙功能)
+    python3 hy2.py install --one-click
+
+    # 基础安装
     python3 hy2.py install
 
-    # 完整防墙配置 (真实域名 + 自动nginx)
-    python3 hy2.py install --domain your.domain.com --use-real-cert --email your@email.com
+    # 最强防墙配置
+    python3 hy2.py install --port-hopping --obfs-password "random123" --http3-masquerade --domain your.domain.com --use-real-cert
 
-    
+    # 端口跳跃模式 (防端口封锁)
+    python3 hy2.py install --port-hopping --port 443
 
-    # 自定义配置
-    python3 hy2.py install --port 8443 --password mySecretPass
+    # 流量混淆模式 (防DPI检测)
+    python3 hy2.py install --obfs-password "myObfsKey" --port 8443
 
-    # 服务管理和客户端
-    python3 hy2.py status     # 查看状态
-    python3 hy2.py client     # 客户端连接指南
-    python3 hy2.py del        # 删除安装
+    # HTTP/3伪装模式
+    python3 hy2.py install --http3-masquerade --port 443
 
-🛡️ 防墙优化特性:
-✅ 默认使用443端口 (HTTPS标准端口)  
-✅ 自动安装配置nginx (TCP端口伪装)
-✅ Web页面伪装 (看起来像正常网站)
-✅ 支持真实域名证书 (Let's Encrypt)
-✅ 集成企业级Web伪装页面
-✅ 随机伪装目标网站
-✅ 优化流量特征
-✅ 降低日志记录级别
+🛡️ Hysteria2 真实防墙技术:
 
-🌟 三层防护体系:
-1️⃣ Hysteria2协议混淆 (基础防护)
-2️⃣ nginx Web伪装 (中级防护) 
-3️⃣ 完整防护体系
+🎯 支持的防墙功能:
+1️⃣ 端口跳跃 (Port Hopping): 动态切换端口，防止端口封锁
+2️⃣ Salamander混淆: 加密流量特征，防DPI深度包检测  
+3️⃣ HTTP/3伪装: 流量看起来像正常HTTP/3网站访问
+4️⃣ Web页面伪装: nginx显示正常网站页面
+
+🔒 防护级别:
+• 🔥 顶级防护: 端口跳跃 + 混淆 + HTTP/3伪装 + Web伪装
+• 🔥 高级防护: 混淆 + HTTP/3伪装 + Web伪装
+• 🔒 中级防护: 端口跳跃 + Web伪装
+• ✅ 基础防护: Web伪装
+• ⚡ 高速模式: 纯UDP无额外防护
+
+⚠️ 重要提醒:
+- Hysteria2使用UDP协议，防火墙必须开放UDP端口
+- 端口跳跃模式需要开放端口范围
+- 混淆模式客户端和服务端必须使用相同密码
+- HTTP/3伪装提供最佳流量隐蔽性
+
+🌟 推荐配置:
+1️⃣ 🎯 最佳推荐: --simple (端口跳跃+混淆+nginx Web伪装)
+2️⃣ 完整功能: --one-click (一键部署所有功能)
+3️⃣ 速度优先: 基础安装
+4️⃣ 稳定优先: --port-hopping
+5️⃣ 隐蔽优先: --obfs-password + --http3-masquerade
 """)
 
 def create_nginx_masquerade(base_dir, domain, web_dir):
@@ -1559,8 +1710,17 @@ def setup_dual_port_masquerade(base_dir, domain, web_dir, cert_path, key_path):
         
         # 复制我们的伪装文件到nginx默认目录
         if os.path.exists(web_dir):
-            subprocess.run(['sudo', 'cp', '-r', f'{web_dir}/*', nginx_web_dir], check=True)
-            print(f"✅ 伪装文件已复制到: {nginx_web_dir}")
+            # 使用find命令复制文件，避免shell通配符问题
+            try:
+                subprocess.run(['sudo', 'find', web_dir, '-type', 'f', '-exec', 'cp', '{}', nginx_web_dir, ';'], check=True)
+                print(f"✅ 伪装文件已复制到: {nginx_web_dir}")
+            except:
+                # 备选方案：逐个复制文件
+                for file in os.listdir(web_dir):
+                    src_file = os.path.join(web_dir, file)
+                    if os.path.isfile(src_file):
+                        subprocess.run(['sudo', 'cp', src_file, nginx_web_dir], check=True)
+                print(f"✅ 伪装文件已复制到: {nginx_web_dir}")
         else:
             print(f"⚠️ 原Web目录不存在，直接在nginx目录创建伪装文件...")
             create_web_files_in_directory(nginx_web_dir)
@@ -1638,11 +1798,20 @@ server {{
         print(f"❌ nginx配置失败: {e}")
         return False
 
-
-
-def show_client_setup(config_link, server_address, port, password, use_real_cert):
+def show_client_setup(config_link, server_address, port, password, use_real_cert, enable_port_hopping=False, obfs_password=None, enable_http3_masquerade=False):
     """显示客户端连接指南"""
     insecure_text = "否" if use_real_cert else "是"
+    
+    # 构建功能描述
+    features = []
+    if enable_port_hopping:
+        features.append("端口跳跃")
+    if obfs_password:
+        features.append("Salamander混淆")
+    if enable_http3_masquerade:
+        features.append("HTTP/3伪装")
+    
+    feature_text = " + ".join(features) if features else "标准模式"
     
     print(f"""
 📱 客户端连接指南
@@ -1652,60 +1821,57 @@ def show_client_setup(config_link, server_address, port, password, use_real_cert
 
 📋 手动配置参数:
 服务器地址: {server_address}
-端口: {port}
+端口: {port if not enable_port_hopping else f"{max(1024, port-50)}-{min(65535, port+50)}"} (UDP协议)
 密码: {password}
 协议: Hysteria2
+防墙功能: {feature_text}
 TLS: 启用
 跳过证书验证: {insecure_text}
 SNI: {server_address}
+{'混淆密码: ' + obfs_password if obfs_password else ''}
 
-💻 Windows客户端:
+⚠️ 重要提醒: 
+- Hysteria2使用UDP协议，确保防火墙已开放UDP端口
+{'- 端口跳跃模式：需要开放端口范围 ' + str(max(1024, port-50)) + '-' + str(min(65535, port+50)) if enable_port_hopping else ''}
+{'- Salamander混淆：客户端必须填写相同的混淆密码' if obfs_password else ''}
+{'- HTTP/3伪装：流量看起来像正常HTTP/3网站访问' if enable_http3_masquerade else ''}
 
-1️⃣ v2rayN (推荐)
-   - 下载: https://github.com/2dust/v2rayN/releases
-   - 添加服务器 → 选择"自定义配置服务器"
-   - 粘贴上面的链接或手动填写参数
+💻 客户端配置示例:
 
-2️⃣ Clash Verge
-   - 下载: https://github.com/clash-verge-rev/clash-verge-rev/releases
-   - 配置 → 导入链接或手动添加
+1️⃣ v2rayN (Windows) 配置:
+   - 服务器地址: {server_address}
+   - 端口: {port if not enable_port_hopping else f"{max(1024, port-50)}-{min(65535, port+50)}"}
+   - 密码: {password}
+   - 协议: Hysteria2
+   {'- 混淆密码: ' + obfs_password if obfs_password else ''}
 
-3️⃣ NekoRay
-   - 下载: https://github.com/MatsuriDayo/nekoray/releases
-   - 程序 → 添加配置 → Hysteria2
+2️⃣ Clash Meta 配置文件:
+```yaml
+proxies:
+  - name: "Hysteria2"
+    type: hysteria2
+    server: {server_address}
+    port: {port if not enable_port_hopping else f"{max(1024, port-50)}-{min(65535, port+50)}"}
+    password: {password}
+{'    obfs:' if obfs_password else ''}
+{'      type: salamander' if obfs_password else ''}
+{'      salamander:' if obfs_password else ''}
+{'        password: "' + obfs_password + '"' if obfs_password else ''}
+    tls: true
+    skip-cert-verify: {str(not use_real_cert).lower()}
+```
 
-📱 Android客户端:
-
-1️⃣ v2rayNG
-   - Google Play / GitHub下载
-   - 点击"+"添加配置
-   - 选择"从剪贴板导入"或手动配置
-
-2️⃣ Clash Meta for Android
-   - 配置 → 新增配置 → 手动输入
-
-🍎 iOS客户端:
-
-1️⃣ Shadowrocket (付费)
-   - App Store下载
-   - 右上角"+"添加服务器
-   - 选择"Hysteria2"类型
-
-2️⃣ Quantumult X (付费)  
-   - 节点 → 添加 → 服务器
-   - 选择Hysteria2协议
-
-🐧 Linux客户端:
-
-1️⃣ 命令行客户端
-   wget https://github.com/apernet/hysteria/releases/download/app/v2.6.1/hysteria-linux-amd64
-   chmod +x hysteria-linux-amd64
-   ./hysteria-linux-amd64 client -c config.json
-
-2️⃣ 配置文件 (config.json):
+3️⃣ Linux客户端配置 (config.json):
+```json
 {{
-  "server": "{server_address}:{port}",
+  "server": "{server_address}:{port if not enable_port_hopping else f"{max(1024, port-50)}-{min(65535, port+50)}"}",
   "auth": "{password}",
+{'  "obfs": {{' if obfs_password else ''}
+{'    "type": "salamander",' if obfs_password else ''}
+{'    "salamander": {{' if obfs_password else ''}
+{'      "password": "' + obfs_password + '"' if obfs_password else ''}
+{'    }}' if obfs_password else ''}
+{'  }},' if obfs_password else ''}
   "tls": {{
     "sni": "{server_address}",
     "insecure": {"true" if not use_real_cert else "false"}
@@ -1717,15 +1883,7 @@ SNI: {server_address}
     "listen": "127.0.0.1:8080"
   }}
 }}
-
-🍎 macOS客户端:
-
-1️⃣ ClashX Pro
-   - 配置 → 托管配置 → 管理
-   - 添加Hysteria2节点
-
-2️⃣ Surge (付费)
-   - 配置 → 代理服务器 → 添加
+```
 
 🔧 连接测试:
 
@@ -1737,210 +1895,40 @@ SNI: {server_address}
 ⚠️ 常见问题:
 
 Q: 连接失败怎么办?
-A: 1. 检查服务器防火墙是否开放{port}端口
-   2. 确认密码输入正确
-   3. 尝试关闭客户端防病毒软件
+A: 1. 检查服务器防火墙是否开放UDP端口
+   {'2. 端口跳跃模式需要开放端口范围：' + str(max(1024, port-50)) + '-' + str(min(65535, port+50)) if enable_port_hopping else '2. 确认端口' + str(port) + '未被占用'}
+   {'3. 确认混淆密码与服务器一致：' + obfs_password if obfs_password else '3. 尝试关闭客户端防病毒软件'}
 
-Q: 速度慢怎么办?
-A: 1. 尝试更换客户端
-   2. 检查本地网络环境
-   3. 服务器可能负载过高
+Q: 端口跳跃的优势?
+A: 1. 防止单一端口被封锁
+   2. 增加检测和封锁难度
+   3. 提高连接稳定性
 
-Q: 无法访问某些网站?
-A: 这是正常现象，部分网站可能有防护措施
+Q: HTTP/3伪装的作用?
+A: 1. 流量看起来像正常HTTP/3网站访问
+   2. 降低被DPI识别的概率
+   3. 提高隐蔽性
 
-🎯 优化建议:
-- 选择延迟最低的客户端
-- 定期更新客户端版本
-- 避免在高峰期使用
+🎯 性能对比:
+- 标准模式: 速度最快，延迟最低
+- 端口跳跃: 稳定性高，防封锁强
+- 混淆模式: 隐蔽性强，轻微性能损失
+- HTTP/3伪装: 最佳流量隐蔽性
+
+🌟 使用场景:
+{'• 端口跳跃: 适合经常封端口的网络环境' if enable_port_hopping else '• 标准模式: 适合大部分网络环境'}
+{'• 混淆模式: 适合有DPI检测的网络环境' if obfs_password else ''}
+{'• HTTP/3伪装: 适合严格审查的网络环境' if enable_http3_masquerade else ''}
 
 连接成功后即可享受高速稳定的网络体验！
 """)
 
-def verify_smart_proxy(server_address, port=443):
-    """验证智能代理配置是否工作"""
-    print("🔍 正在验证智能代理配置...")
-    
-    try:
-        import socket
-        import ssl
-        import time
-        
-        # 1. 测试TCP 443端口连接
-        print("1️⃣ 测试TCP连接到443端口...")
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(10)
-        result = sock.connect_ex((server_address, port))
-        sock.close()
-        
-        if result == 0:
-            print("✅ TCP 443端口连接成功")
-        else:
-            print("❌ TCP 443端口连接失败")
-            return False
-        
-        # 2. 测试HTTPS网站访问
-        print("2️⃣ 测试HTTPS网站访问...")
-        try:
-            context = ssl.create_default_context()
-            context.check_hostname = False
-            context.verify_mode = ssl.CERT_NONE
-            
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            ssl_sock = context.wrap_socket(sock, server_name=server_address)
-            ssl_sock.settimeout(10)
-            ssl_sock.connect((server_address, port))
-            
-            # 发送HTTP请求
-            request = f"GET / HTTP/1.1\r\nHost: {server_address}\r\nConnection: close\r\n\r\n"
-            ssl_sock.send(request.encode())
-            
-            response = ssl_sock.recv(1024).decode()
-            ssl_sock.close()
-            
-            if "Global Digital Solutions" in response or "200 OK" in response:
-                print("✅ HTTPS网站访问成功，伪装页面正常")
-            else:
-                print("⚠️ HTTPS可访问，但伪装页面可能有问题")
-                
-        except Exception as e:
-            print(f"⚠️ HTTPS访问测试失败: {e}")
-        
-        # 3. 测试WebSocket路径
-        print("3️⃣ 测试WebSocket隧道路径...")
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            ssl_sock = context.wrap_socket(sock, server_name=server_address)
-            ssl_sock.settimeout(10)
-            ssl_sock.connect((server_address, port))
-            
-            # 发送WebSocket升级请求
-            ws_request = f"""GET /hy2-tunnel HTTP/1.1\r
-Host: {server_address}\r
-Upgrade: websocket\r
-Connection: Upgrade\r
-Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r
-Sec-WebSocket-Version: 13\r
-\r
-"""
-            ssl_sock.send(ws_request.encode())
-            
-            ws_response = ssl_sock.recv(1024).decode()
-            ssl_sock.close()
-            
-            if "101 Switching Protocols" in ws_response or "upgrade" in ws_response.lower():
-                print("✅ WebSocket隧道路径响应正常")
-            else:
-                print("⚠️ WebSocket路径可能配置有问题")
-                print(f"响应: {ws_response[:200]}...")
-                
-        except Exception as e:
-            print(f"⚠️ WebSocket测试失败: {e}")
-        
-        # 4. 检查端口监听状态
-        print("4️⃣ 检查服务端口状态...")
-        try:
-            import subprocess
-            
-            # 检查nginx TCP 443
-            tcp_result = subprocess.run(['ss', '-tlnp'], capture_output=True, text=True)
-            if ':443 ' in tcp_result.stdout:
-                print("✅ nginx正在监听TCP 443端口")
-            else:
-                print("⚠️ 未检测到TCP 443端口监听")
-            
-            # 检查Hysteria2 UDP内部端口
-            udp_result = subprocess.run(['ss', '-ulnp'], capture_output=True, text=True)
-            if ':44300 ' in udp_result.stdout:
-                print("✅ Hysteria2正在监听UDP 44300端口（内部）")
-            else:
-                print("⚠️ 未检测到Hysteria2内部端口监听")
-                
-        except Exception as e:
-            print(f"⚠️ 端口检查失败: {e}")
-        
-        print("\n🎯 验证总结:")
-        print("• TCP 443: nginx接收HTTPS连接")
-        print("• /hy2-tunnel: WebSocket隧道路径")
-        print("• UDP 44300: Hysteria2内部服务")
-        print("• 流量路径: 客户端TCP → nginx → WebSocket → Hysteria2 UDP")
-        
-        return True
-        
-    except Exception as e:
-        print(f"❌ 验证过程出错: {e}")
-        return False
-
-def show_smart_proxy_client_setup(server_address, password, use_real_cert):
-    """显示智能代理模式的客户端配置"""
-    ws_path = "/hy2-tunnel"
-    insecure_flag = "0" if use_real_cert else "1"
-    
-    # 生成WebSocket模式的连接链接
-    websocket_link = f"hysteria2://{urllib.parse.quote(password)}@{server_address}:443?transport=ws&path={urllib.parse.quote(ws_path)}&insecure={insecure_flag}&sni={server_address}"
-    
-    print(f"""
-🚀 智能代理模式客户端配置
-
-🎯 连接方式: TCP → WebSocket → UDP 
-🔒 外界看到: 标准HTTPS网站访问
-⚡ 实际传输: Hysteria2高速代理
-
-🔗 WebSocket配置链接:
-{websocket_link}
-
-📋 手动配置参数:
-服务器地址: {server_address}
-端口: 443 (TCP)
-密码: {password}
-协议: Hysteria2
-传输方式: WebSocket
-WebSocket路径: {ws_path}
-TLS: 启用
-跳过证书验证: {'否' if use_real_cert else '是'}
-SNI: {server_address}
-
-💻 支持的客户端:
-
-1️⃣ Hysteria2官方客户端 (推荐)
-   - 完美支持WebSocket传输
-   - 下载: https://github.com/apernet/hysteria/releases
-
-2️⃣ v2rayN (Windows)
-   - 添加Hysteria2配置
-   - 在传输设置中选择WebSocket
-   - 设置路径为: {ws_path}
-
-3️⃣ Clash Meta
-   - 支持Hysteria2 WebSocket传输
-   - 配置文件示例:
-```yaml
-proxies:
-  - name: "智能代理"
-    type: hysteria2
-    server: {server_address}
-    port: 443
-    password: {password}
-    transport:
-      type: ws
-      path: {ws_path}
-    tls: true
-    skip-cert-verify: {str(not use_real_cert).lower()}
-```
-
-🎉 优势对比:
-• 传统方式: 客户端UDP → 服务器UDP (容易被检测)
-• 智能代理: 客户端TCP → nginx HTTPS → WebSocket → Hysteria2
-• 伪装度: 极高 (外界只看到HTTPS网站访问)
-• 延迟: 最低 (无Cloudflare转发)
-""")
-
 def main():
-    parser = argparse.ArgumentParser(description='Hysteria2 管理工具（增强防墙版）')
+    parser = argparse.ArgumentParser(description='Hysteria2 一键部署工具（防墙增强版）')
     parser.add_argument('command', nargs='?', default='install',
-                      help='命令: install, del, status, help, smart-proxy, setup-nginx, client, fix, verify')
+                      help='命令: install, del, status, help, setup-nginx, client, fix')
     parser.add_argument('--ip', help='指定服务器IP地址或域名')
-    parser.add_argument('--port', type=int, help='指定服务器端口（推荐443/80）')
+    parser.add_argument('--port', type=int, help='指定服务器端口（推荐443）')
     parser.add_argument('--password', help='指定密码')
     parser.add_argument('--domain', help='指定域名（用于获取真实证书）')
     parser.add_argument('--email', help='Let\'s Encrypt证书邮箱地址')
@@ -1951,6 +1939,22 @@ def main():
     parser.add_argument('--auto-nginx', action='store_true', default=True,
                       help='安装时自动配置nginx (默认启用)')
     
+    # 真正的Hysteria2防墙功能选项
+    parser.add_argument('--port-hopping', action='store_true',
+                      help='启用端口跳跃（动态切换端口，防封锁）')
+    parser.add_argument('--obfs-password', 
+                      help='启用Salamander混淆密码（防DPI检测）')
+    parser.add_argument('--http3-masquerade', action='store_true',
+                      help='启用HTTP/3伪装（流量看起来像正常HTTP/3）')
+    parser.add_argument('--one-click', action='store_true',
+                      help='一键部署（自动启用所有防墙功能）')
+    parser.add_argument('--simple', action='store_true',
+                      help='简化一键部署（端口跳跃+混淆+nginx Web伪装）')
+    parser.add_argument('--port-range', 
+                      help='指定端口跳跃范围 (格式: 起始端口-结束端口，如: 28888-29999)')
+    parser.add_argument('--enable-bbr', action='store_true',
+                      help='启用BBR拥塞控制算法优化网络性能')
+    
     
     args = parser.parse_args()
     
@@ -1960,126 +1964,10 @@ def main():
         show_status()
     elif args.command == 'help':
         show_help()
-    elif args.command == 'smart-proxy':
-        # 智能代理配置（推荐）
-        home = get_user_home()
-        base_dir = f"{home}/.hysteria2"
-        
-        if not os.path.exists(base_dir):
-            print("❌ Hysteria2 未安装，请先运行 install 命令")
-            sys.exit(1)
-        
-        server_address = get_ip_address()
-        
-        # 自动检测证书路径
-        print("🔍 检测现有证书文件...")
-        possible_cert_paths = [
-            f"{base_dir}/cert/server.crt",
-            f"{base_dir}/certs/cert.pem", 
-            f"{base_dir}/cert.pem"
-        ]
-        possible_key_paths = [
-            f"{base_dir}/cert/server.key",
-            f"{base_dir}/certs/key.pem",
-            f"{base_dir}/key.pem"
-        ]
-        
-        cert_path = None
-        key_path = None
-        
-        for path in possible_cert_paths:
-            if os.path.exists(path):
-                cert_path = path
-                print(f"✅ 找到证书文件: {cert_path}")
-                break
-        
-        for path in possible_key_paths:
-            if os.path.exists(path):
-                key_path = path
-                print(f"✅ 找到密钥文件: {key_path}")
-                break
-        
-        if not cert_path or not key_path:
-            print("⚠️ 未找到证书文件，生成新的自签名证书...")
-            cert_path, key_path = generate_self_signed_cert(base_dir, server_address)
-        
-        # 检测nginx默认Web目录
-        nginx_web_dirs = ["/usr/share/nginx/html", "/var/www/html", "/var/www"]
-        nginx_web_dir = None
-        for dir_path in nginx_web_dirs:
-            if os.path.exists(dir_path):
-                nginx_web_dir = dir_path
-                break
-        
-        if not nginx_web_dir:
-            nginx_web_dir = "/var/www/html"
-            subprocess.run(['sudo', 'mkdir', '-p', nginx_web_dir], check=True)
-        
-        # 创建/更新伪装文件
-        print("📝 创建伪装网站...")
-        create_web_files_in_directory(nginx_web_dir)
-        set_nginx_permissions(nginx_web_dir)
-        
-        # 配置智能代理
-        success, internal_port = setup_nginx_smart_proxy(base_dir, server_address, nginx_web_dir, cert_path, key_path, 443)
-        if success:
-            print("🎉 智能代理配置成功！")
-            
-            # 获取密码信息
-            config_path = f"{base_dir}/config/config.json"
-            with open(config_path, 'r') as f:
-                config = json.load(f)
-            password = config['auth']['password']
-            use_real_cert = 'letsencrypt' in config['tls']['cert']
-            
-            # 显示智能代理客户端配置
-            show_smart_proxy_client_setup(server_address, password, use_real_cert)
-            
-            # 简化验证
-            print("\n" + "="*30)
-            print("🔍 验证配置...")
-            import socket
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(3)
-            result = sock.connect_ex((server_address, 443))
-            sock.close()
-            if result == 0:
-                print("✅ 智能代理工作正常")
-                print(f"💡 浏览器访问: https://{server_address}")
-            else:
-                print("⚠️ 连接测试失败，请检查防火墙设置")
-            
-        else:
-            print("❌ 智能代理配置失败")
-    
-    elif args.command == 'verify':
-        # 验证智能代理配置
-        home = get_user_home()
-        base_dir = f"{home}/.hysteria2"
-        
-        if not os.path.exists(base_dir):
-            print("❌ Hysteria2 未安装，请先运行 install 命令")
-            sys.exit(1)
-        
-        server_address = args.ip if args.ip else get_ip_address()
-        port = args.port if args.port else 443
-        
-        print(f"🔍 验证服务器: {server_address}:{port}")
-        success = verify_smart_proxy(server_address, port)
-        
-        if success:
-            print("\n✅ 智能代理配置验证完成！")
-            print("📝 如果验证成功，说明以下流程工作正常：")
-            print("  1. 客户端TCP连接到nginx (443端口)")
-            print("  2. nginx显示伪装网站给浏览器")
-            print("  3. WebSocket路径转发到Hysteria2")
-            print("  4. Hysteria2处理代理流量")
-        else:
-            print("\n❌ 验证发现问题，请检查配置")
-            print("💡 尝试运行: python3 hy2.py smart-proxy 重新配置")
+
             
     elif args.command == 'setup-nginx':
-        # 设置nginx TCP端口伪装（传统方式）
+        # 设置nginx Web伪装
         home = get_user_home()
         base_dir = f"{home}/.hysteria2"
         
@@ -2101,7 +1989,7 @@ def main():
         cert_path = config['tls']['cert']
         key_path = config['tls']['key']
         
-        print(f"正在为域名 {domain} 设置nginx TCP端口伪装...")
+        print(f"正在为域名 {domain} 设置nginx Web伪装...")
         success = setup_dual_port_masquerade(base_dir, domain, web_dir, cert_path, key_path)
         
         if success:
@@ -2109,15 +1997,15 @@ def main():
 🎉 nginx设置成功！
 
 现在你有：
-- TCP 443端口: nginx提供真实Web页面 (可用curl测试)
-- UDP 443端口: Hysteria2代理服务
+- TCP {443 if ':443' in config['listen'] else config['listen'].replace(':', '')}端口: nginx提供真实Web页面
+- UDP {443 if ':443' in config['listen'] else config['listen'].replace(':', '')}端口: Hysteria2代理服务
 
 测试命令:
 curl https://{domain}
 或
 curl -k https://{domain}  # 如果使用自签名证书
 
-这样外界看起来就是一个正常的HTTPS网站！
+⚠️ 重要: 确保防火墙已开放UDP端口用于Hysteria2！
 """)
         else:
             print("❌ nginx设置失败，请检查错误信息")
@@ -2145,9 +2033,11 @@ curl -k https://{domain}  # 如果使用自签名证书
         use_real_cert = 'letsencrypt' in config['tls']['cert']
         
         insecure_param = "0" if use_real_cert else "1"
+        
+        # Hysteria2官方链接格式（简化）
         config_link = f"hysteria2://{urllib.parse.quote(password)}@{server_address}:{port}?insecure={insecure_param}&sni={server_address}"
         
-        show_client_setup(config_link, server_address, port, password, use_real_cert)
+        show_client_setup(config_link, server_address, port, password, use_real_cert, args.port_hopping, args.obfs_password, args.http3_masquerade)
     elif args.command == 'fix':
         # 修复nginx配置和权限问题
         home = get_user_home()
@@ -2292,6 +2182,38 @@ curl -k https://{domain}  # HTTPS访问
             print(f"❌ nginx重新加载失败: {e}")
             print("请手动检查nginx配置: sudo nginx -t")
     elif args.command == 'install':
+        # 简化一键部署
+        if args.simple:
+            server_address = args.ip if args.ip else get_ip_address()
+            port = args.port if args.port else 443
+            password = args.password if args.password else "123qwe!@#QWE"
+            
+            result = deploy_hysteria2_complete(
+                server_address=server_address,
+                port=port, 
+                password=password,
+                enable_real_cert=args.use_real_cert,
+                domain=args.domain,
+                email=args.email if args.email else "admin@example.com",
+                port_range=args.port_range,
+                enable_bbr=args.enable_bbr
+            )
+            return
+        
+        # 一键部署逻辑
+        if args.one_click:
+            print("🚀 一键部署模式 - 自动启用所有防墙功能")
+            args.port_hopping = True
+            args.http3_masquerade = True
+            if not args.obfs_password:
+                # 生成随机混淆密码
+                import random
+                import string
+                args.obfs_password = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
+                print(f"🔒 自动生成混淆密码: {args.obfs_password}")
+            if not args.domain and not args.use_real_cert:
+                print("💡 建议使用 --domain 和 --use-real-cert 获取真实证书")
+        
         # 防墙优化配置
         port = args.port if args.port else 443  # 默认使用443端口
         password = args.password if args.password else "123qwe!@#QWE"
@@ -2315,6 +2237,17 @@ curl -k https://{domain}  # HTTPS访问
         print(f"服务器地址: {server_address}")
         print(f"端口: {port} ({'HTTPS标准端口' if port == 443 else 'HTTP标准端口' if port == 80 else '自定义端口'})")
         print(f"证书类型: {'真实证书' if use_real_cert else '自签名证书'}")
+        
+        # 显示启用的防墙功能
+        if args.port_hopping:
+            print("🔄 端口跳跃: 启用 (动态切换端口，防封锁)")
+        if args.obfs_password:
+            print(f"🔒 Salamander混淆: 启用 (密码: {args.obfs_password})")
+        if args.http3_masquerade:
+            print("🌐 HTTP/3伪装: 启用 (流量看起来像正常HTTP/3)")
+        
+        print(f"📡 传输协议: UDP/QUIC")
+        print(f"🛡️ 防护级别: {'顶级防护' if args.port_hopping and args.obfs_password and args.http3_masquerade else '高级防护' if (args.port_hopping and args.obfs_password) or (args.obfs_password and args.http3_masquerade) else '中级防护' if args.port_hopping or args.obfs_password or args.http3_masquerade else '基础防护'}")
         
         # 检查端口
         if not check_port_available(port):
@@ -2391,7 +2324,25 @@ curl -k https://{domain}  # HTTPS访问
         
         # 创建配置
         config_path = create_config(base_dir, port, password, cert_path, key_path, 
-                                  server_address, args.web_masquerade, web_dir)
+                                  server_address, args.web_masquerade, web_dir, args.port_hopping, args.obfs_password, args.http3_masquerade)
+        
+        # 配置端口跳跃（如果启用）
+        if args.port_hopping:
+            # 读取配置文件获取端口跳跃信息
+            with open(config_path, 'r') as f:
+                config = json.load(f)
+            
+            if "_port_hopping" in config:
+                ph_info = config["_port_hopping"]
+                setup_port_hopping_iptables(
+                    ph_info["range_start"], 
+                    ph_info["range_end"], 
+                    ph_info["listen_port"]
+                )
+                # 清理配置文件中的临时信息
+                del config["_port_hopping"]
+                with open(config_path, 'w') as f:
+                    json.dump(config, f, indent=2)
         
         # 创建启动脚本
         start_script = create_service_script(base_dir, binary_path, config_path, port)
@@ -2402,69 +2353,57 @@ curl -k https://{domain}  # HTTPS访问
         # 立即启动Hysteria2服务
         service_started = start_service(start_script, port, base_dir)
         
-        # 自动配置nginx智能代理 (如果启用)
+        # 自动配置nginx Web伪装 (如果启用)
         nginx_success = False
         if args.auto_nginx and port == 443:
-            print("\n🚀 配置智能代理...")
+            print("\n🚀 配置nginx Web伪装...")
             
             # 检测并安装nginx
             try:
                 subprocess.run(['which', 'nginx'], check=True, capture_output=True)
                 print("✅ 检测到nginx已安装")
+                has_nginx = True
             except:
                 print("正在安装nginx...")
-                if shutil.which('dnf'):
-                    subprocess.run(['sudo', 'dnf', 'install', '-y', 'nginx'], check=True)
-                elif shutil.which('yum'):
-                    subprocess.run(['sudo', 'yum', 'install', '-y', 'nginx'], check=True)
-                elif shutil.which('apt'):
-                    subprocess.run(['sudo', 'apt', 'update'], check=True)
-                    subprocess.run(['sudo', 'apt', 'install', '-y', 'nginx'], check=True)
-                else:
-                    print("⚠️ 无法自动安装nginx")
-                    nginx_success = False
-            
-            if nginx_success is not False:
-                # 检测nginx默认Web目录并创建伪装文件
-                nginx_web_dirs = ["/usr/share/nginx/html", "/var/www/html", "/var/www"]
-                nginx_web_dir = None
-                for dir_path in nginx_web_dirs:
-                    if os.path.exists(dir_path):
-                        nginx_web_dir = dir_path
-                        break
-                
-                if not nginx_web_dir:
-                    nginx_web_dir = "/var/www/html"
-                    subprocess.run(['sudo', 'mkdir', '-p', nginx_web_dir], check=True)
-                
-                # 创建伪装文件
-                if os.path.exists(f"{nginx_web_dir}/index.html"):
-                    subprocess.run(['sudo', 'cp', f'{nginx_web_dir}/index.html', f'{nginx_web_dir}/index.html.backup'], check=True)
-                
-                print("📝 正在创建伪装网站文件...")
-                create_web_files_in_directory(nginx_web_dir)
-                set_nginx_permissions(nginx_web_dir)
-                
-                # 使用智能代理功能
+                has_nginx = False
                 try:
-                    success, internal_port = setup_nginx_smart_proxy(base_dir, server_address, nginx_web_dir, cert_path, key_path, port)
+                    if shutil.which('dnf'):
+                        subprocess.run(['sudo', 'dnf', 'install', '-y', 'nginx'], check=True)
+                        has_nginx = True
+                    elif shutil.which('yum'):
+                        subprocess.run(['sudo', 'yum', 'install', '-y', 'epel-release'], check=True)
+                        subprocess.run(['sudo', 'yum', 'install', '-y', 'nginx'], check=True)
+                        has_nginx = True
+                    elif shutil.which('apt'):
+                        subprocess.run(['sudo', 'apt', 'update'], check=True)
+                        subprocess.run(['sudo', 'apt', 'install', '-y', 'nginx'], check=True)
+                        has_nginx = True
+                    else:
+                        print("⚠️ 无法自动安装nginx，跳过Web伪装配置")
+                        has_nginx = False
+                    
+                    if has_nginx:
+                        print("✅ nginx安装完成")
+                except Exception as e:
+                    print(f"⚠️ nginx安装失败: {e}")
+                    has_nginx = False
+            
+            # 配置nginx
+            if has_nginx:
+                try:
+                    # 使用简化配置方案
+                    success = setup_dual_port_masquerade(base_dir, server_address, web_dir, cert_path, key_path)
                     if success:
                         nginx_success = True
-                        print("🎉 智能代理配置成功！")
-                        print("🎯 外界访问443端口看到正常HTTPS网站")
-                        print("🎯 Hysteria2客户端通过WebSocket隧道透明连接")
-                        
-                        # 更新客户端连接信息
-                        print(f"\n📱 客户端连接方式已优化:")
-                        print(f"服务器: {server_address}")
-                        print(f"端口: 443 (TCP)")
-                        print(f"传输方式: WebSocket (/hy2-tunnel)")
-                        print(f"内部端口: {internal_port} (UDP)")
+                        print("🎉 nginx Web伪装配置成功！")
+                        print("🎯 TCP 443端口: 显示正常HTTPS网站")
+                        print("🎯 UDP 443端口: Hysteria2代理服务")
+                        print("⚠️ 重要: 防火墙需要同时开放TCP和UDP 443端口")
                     else:
-                        print("⚠️ 智能代理配置失败，使用基础方案")
+                        print("⚠️ nginx配置失败，跳过Web伪装")
                         nginx_success = False
                 except Exception as e:
-                    print(f"⚠️ 智能代理配置异常: {e}")
+                    print(f"⚠️ nginx配置异常: {e}")
                     nginx_success = False
         
         if not nginx_success and port == 443:
@@ -2472,7 +2411,16 @@ curl -k https://{domain}  # HTTPS访问
         
         # 生成客户端配置链接
         insecure_param = "0" if use_real_cert else "1"
-        config_link = f"hysteria2://{urllib.parse.quote(password)}@{server_address}:{port}?insecure={insecure_param}&sni={server_address}"
+        
+        # 构建链接参数
+        params = [f"insecure={insecure_param}", f"sni={server_address}"]
+        
+        # 添加混淆参数
+        if args.obfs_password:
+            params.append(f"obfs=salamander")
+            params.append(f"obfs-password={urllib.parse.quote(args.obfs_password)}")
+        
+        config_link = f"hysteria2://{urllib.parse.quote(password)}@{server_address}:{port}?{'&'.join(params)}"
         
         print(f"""
 🎉 Hysteria2 防墙增强版安装成功！
@@ -2511,21 +2459,38 @@ TLS: 启用
 SNI: {server_address}
 
 🛡️ 防墙优化特性:
-✅ 使用标准HTTPS端口 (443)
-✅ Web页面伪装 (访问 https://{server_address}:{port} 显示正常网站)
-✅ 随机伪装目标网站
+✅ 使用端口 {port} ({'端口跳跃模式' if args.port_hopping else 'UDP原生协议'})
+✅ Web页面伪装 (TCP端口显示正常网站)
+{'✅ 端口跳跃: 动态切换端口防封锁' if args.port_hopping else '✅ 双端口策略 (TCP用于伪装，UDP用于代理)'}
+{'✅ Salamander混淆: 密码 ' + args.obfs_password if args.obfs_password else ''}
+{'✅ HTTP/3伪装: 流量看起来像正常HTTP/3' if args.http3_masquerade else '✅ 随机伪装目标网站'}
 ✅ 优化带宽配置 (1000mbps)  
 ✅ 降低日志级别
-{'✅ nginx TCP端口伪装' if nginx_success else '⚠️ nginx未配置 (建议运行: python3 hy2.py setup-nginx)'}
+{'✅ nginx Web伪装已配置' if nginx_success else '⚠️ nginx未配置 (建议运行: python3 hy2.py setup-nginx)'}
 {'✅ 真实域名证书' if use_real_cert else '⚠️ 自签名证书 (建议使用真实域名证书)'}
 
+⚠️ 重要防火墙配置:
+{'- 必须开放 UDP 端口范围 ' + str(max(1024, port-50)) + '-' + str(min(65535, port+50)) + ' (端口跳跃模式)' if args.port_hopping else '- 必须开放 UDP ' + str(port) + ' 端口 (Hysteria2必需)'}
+{'- 建议开放 TCP ' + str(port) + ' 端口 (nginx Web伪装)' if nginx_success else ''}
+
+🎯 当前配置级别:
+{'🔥 顶级防护: 端口跳跃 + 混淆 + HTTP/3伪装 + Web伪装' if args.port_hopping and args.obfs_password and args.http3_masquerade and nginx_success else ''}
+{'🔥 高级防护: 端口跳跃 + 混淆 + Web伪装' if args.port_hopping and args.obfs_password and not args.http3_masquerade and nginx_success else ''}
+{'🔒 中级防护: 混淆 + HTTP/3伪装 + Web伪装' if not args.port_hopping and args.obfs_password and args.http3_masquerade and nginx_success else ''}
+{'✅ 基础防护: Web伪装' if not args.port_hopping and not args.obfs_password and not args.http3_masquerade and nginx_success else ''}
+{'⚡ 高速模式: 无额外防护' if not args.port_hopping and not args.obfs_password and not args.http3_masquerade and not nginx_success else ''}
+
 💡 快速测试:
-{'curl https://' + server_address + '  # 应正常显示网站' if nginx_success else 'curl -k https://' + server_address + '  # 自签名证书需要-k参数'}
+{'• TCP测试: curl https://' + server_address + '  # 应显示伪装网站' if nginx_success else ''}
+• UDP测试: 使用客户端连接验证Hysteria2服务
 
 💡 进一步优化建议:
 1. 使用真实域名和证书: --domain yourdomain.com --use-real-cert --email your@email.com
-2. 定期更换密码和端口
-3. 监控日志，如发现异常及时调整
+{'2. 端口跳跃已启用，防止端口封锁' if args.port_hopping else '2. 考虑启用端口跳跃: --port-hopping (防止端口封锁)'}
+{'3. 混淆已启用，提供强隐蔽性' if args.obfs_password else '3. 考虑启用混淆: --obfs-password "密码" (防DPI检测)'}
+{'4. HTTP/3伪装已启用，最佳隐蔽性' if args.http3_masquerade else '4. 考虑启用HTTP/3伪装: --http3-masquerade'}
+5. 定期更换密码{'和混淆密钥' if args.obfs_password else ''}
+6. 监控日志，如发现异常及时调整
 
 🌍 支持的客户端:
 - v2rayN (Windows)
@@ -2535,11 +2500,509 @@ SNI: {server_address}
 """)
 
         # 显示客户端连接指南
-        show_client_setup(config_link, server_address, port, password, use_real_cert)
+        show_client_setup(config_link, server_address, port, password, use_real_cert, args.port_hopping, args.obfs_password, args.http3_masquerade)
     else:
         print(f"未知命令: {args.command}")
         show_help()
         sys.exit(1)
+
+def setup_port_hopping_iptables(port_start, port_end, listen_port):
+    """配置iptables实现端口跳跃"""
+    try:
+        print(f"🔧 配置iptables端口跳跃...")
+        print(f"端口范围: {port_start}-{port_end} -> {listen_port}")
+        
+        # 检查iptables是否可用
+        try:
+            subprocess.run(['iptables', '--version'], check=True, capture_output=True)
+        except:
+            print("⚠️ iptables不可用，跳过端口跳跃配置")
+            return False
+        
+        # 清理可能存在的旧规则
+        try:
+            subprocess.run(['sudo', 'iptables', '-t', 'nat', '-D', 'PREROUTING', '-p', 'udp', '--dport', f'{port_start}:{port_end}', '-j', 'DNAT', '--to-destination', f':{listen_port}'], check=False, capture_output=True)
+        except:
+            pass
+        
+        # 添加端口跳跃的iptables规则
+        # IPv4 NAT规则：将端口范围转发到监听端口
+        subprocess.run([
+            'sudo', 'iptables', '-t', 'nat', '-A', 'PREROUTING', 
+            '-p', 'udp', '--dport', f'{port_start}:{port_end}', 
+            '-j', 'DNAT', '--to-destination', f':{listen_port}'
+        ], check=True)
+        
+        # 开放端口范围的防火墙规则
+        subprocess.run([
+            'sudo', 'iptables', '-A', 'INPUT', 
+            '-p', 'udp', '--dport', f'{port_start}:{port_end}', 
+            '-j', 'ACCEPT'
+        ], check=True)
+        
+        # 开放监听端口
+        subprocess.run([
+            'sudo', 'iptables', '-A', 'INPUT', 
+            '-p', 'udp', '--dport', str(listen_port), 
+            '-j', 'ACCEPT'
+        ], check=True)
+        
+        # 尝试保存iptables规则
+        try:
+            # Debian/Ubuntu
+            subprocess.run(['sudo', 'iptables-save'], check=True, capture_output=True)
+            subprocess.run(['sudo', 'netfilter-persistent', 'save'], check=False, capture_output=True)
+        except:
+            try:
+                # CentOS/RHEL
+                subprocess.run(['sudo', 'service', 'iptables', 'save'], check=False, capture_output=True)
+            except:
+                pass
+        
+        print(f"✅ iptables端口跳跃配置成功")
+        print(f"📡 客户端可连接端口范围: {port_start}-{port_end}")
+        print(f"🎯 服务器实际监听端口: {listen_port}")
+        
+        return True
+        
+    except Exception as e:
+        print(f"⚠️ iptables配置失败: {e}")
+        print("端口跳跃功能可能无法正常工作")
+        return False
+
+def deploy_hysteria2_complete(server_address, port=443, password="123qwe!@#QWE", enable_real_cert=False, domain=None, email="admin@example.com", port_range=None, enable_bbr=False):
+    """
+    Hysteria2完整一键部署：端口跳跃 + 混淆 + nginx Web伪装
+    """
+    print("🚀 开始Hysteria2完整部署...")
+    print("📋 部署内容：端口跳跃 + Salamander混淆 + nginx Web伪装")
+    
+    # 1. 创建目录
+    base_dir = create_directories()
+    print(f"✅ 创建目录：{base_dir}")
+    
+    # 2. 下载Hysteria2
+    binary_path, version = download_hysteria2(base_dir)
+    print(f"✅ 下载Hysteria2：{version}")
+    
+    # 3. 生成混淆密码
+    import random, string
+    obfs_password = ''.join(random.choices(string.ascii_letters + string.digits, k=16))
+    print(f"🔒 生成混淆密码：{obfs_password}")
+    
+    # 4. 生成或获取证书
+    if enable_real_cert and domain:
+        cert_path, key_path = get_real_certificate(base_dir, domain, email)
+        if not cert_path:
+            cert_path, key_path = generate_self_signed_cert(base_dir, domain)
+    else:
+        cert_path, key_path = generate_self_signed_cert(base_dir, server_address)
+    print(f"✅ 证书配置：{cert_path}")
+    
+    # 5. 创建Web伪装文件
+    web_dir = create_web_masquerade(base_dir)
+    print(f"✅ 创建Web伪装：{web_dir}")
+    
+    # 6. 创建Hysteria2配置（端口跳跃+混淆+HTTP/3伪装）
+    config = {
+        "listen": f":{port}",
+        "tls": {
+            "cert": cert_path,
+            "key": key_path
+        },
+        "auth": {
+            "type": "password",
+            "password": password
+        },
+        "obfs": {
+            "type": "salamander",
+            "salamander": {
+                "password": obfs_password
+            }
+        },
+        "masquerade": {
+            "type": "proxy",
+            "proxy": {
+                "url": "https://www.microsoft.com",
+                "rewriteHost": True
+            }
+        },
+        "bandwidth": {
+            "up": "1000 mbps",
+            "down": "1000 mbps"
+        },
+        "log": {
+            "level": "warn",
+            "output": f"{base_dir}/logs/hysteria.log",
+            "timestamp": True
+        }
+    }
+    
+    config_path = f"{base_dir}/config/config.json"
+    with open(config_path, "w") as f:
+        json.dump(config, f, indent=2)
+    print(f"✅ 创建配置：{config_path}")
+    
+    # 7. 配置端口跳跃（iptables）
+    if port_range:
+        # 使用用户指定的端口范围
+        port_start, port_end = parse_port_range(port_range)
+        if port_start is None or port_end is None:
+            print("❌ 端口范围解析失败，使用默认范围")
+            port_start = max(1024, port - 25)
+            port_end = min(65535, port + 25)
+            if port < 1049:
+                port_start = 1024
+                port_end = 1074
+    else:
+        # 使用默认端口范围
+        port_start = max(1024, port - 25)
+        port_end = min(65535, port + 25)
+        if port < 1049:
+            port_start = 1024
+            port_end = 1074
+    
+    success = setup_port_hopping_iptables(port_start, port_end, port)
+    if success:
+        print(f"✅ 端口跳跃：{port_start}-{port_end} → {port}")
+    
+    # 8. BBR优化（如果启用）
+    if enable_bbr:
+        bbr_success = enable_bbr_optimization()
+        if bbr_success:
+            print("✅ BBR拥塞控制优化已启用")
+        else:
+            print("⚠️ BBR优化失败，但不影响主要功能")
+    
+    # 9. 创建并启动Hysteria2服务
+    start_script = create_service_script(base_dir, binary_path, config_path, port)
+    service_started = start_service(start_script, port, base_dir)
+    if service_started:
+        print(f"✅ Hysteria2服务启动成功")
+    
+    # 10. 配置nginx Web伪装
+    nginx_success = setup_nginx_web_masquerade(base_dir, server_address, web_dir, cert_path, key_path, port)
+    if nginx_success:
+        print(f"✅ nginx Web伪装配置成功")
+    
+    # 11. 生成客户端配置
+    insecure = "1" if not enable_real_cert else "0"
+    params = [
+        f"insecure={insecure}",
+        f"sni={server_address}",
+        f"obfs=salamander",
+        f"obfs-password={urllib.parse.quote(obfs_password)}"
+    ]
+    
+    config_link = f"hysteria2://{urllib.parse.quote(password)}@{server_address}:{port}?{'&'.join(params)}"
+    
+    # 12. 输出部署结果
+    print(f"""
+🎉 Hysteria2完整部署成功！
+
+📡 服务器信息：
+- 地址：{server_address}
+- 监听端口：{port} (UDP)
+- 客户端端口范围：{port_start}-{port_end}
+- 密码：{password}
+- 混淆密码：{obfs_password}
+
+🔗 客户端链接：
+{config_link}
+
+🛡️ 防护特性：
+✅ 端口跳跃：{port_start}-{port_end} → {port}
+✅ Salamander混淆：{obfs_password}
+✅ HTTP/3伪装：模拟正常HTTP/3流量
+✅ nginx Web伪装：TCP 443显示正常网站
+
+💻 客户端配置示例：
+服务器：{server_address}
+端口：{port_start}-{port_end}
+密码：{password}
+混淆密码：{obfs_password}
+协议：Hysteria2
+TLS：启用，跳过验证
+
+🔧 测试命令：
+- 测试Hysteria2：使用客户端连接
+- 测试Web伪装：curl -k https://{server_address}
+
+⚠️ 防火墙要求：
+- 开放UDP端口范围：{port_start}-{port_end}
+- 开放TCP端口：{port} (nginx)
+""")
+    
+    return {
+        "server": server_address,
+        "port": port,
+        "port_range": f"{port_start}-{port_end}",
+        "password": password,
+        "obfs_password": obfs_password,
+        "config_link": config_link,
+        "nginx_success": nginx_success
+    }
+
+def setup_nginx_web_masquerade(base_dir, server_address, web_dir, cert_path, key_path, port):
+    """
+    配置nginx Web伪装的简化版本
+    """
+    try:
+        print("🔧 配置nginx Web伪装...")
+        
+        # 1. 检查nginx是否安装
+        try:
+            subprocess.run(['which', 'nginx'], check=True, capture_output=True)
+        except:
+            print("正在安装nginx...")
+            if shutil.which('apt'):
+                subprocess.run(['sudo', 'apt', 'update'], check=True)
+                subprocess.run(['sudo', 'apt', 'install', '-y', 'nginx'], check=True)
+            elif shutil.which('yum'):
+                subprocess.run(['sudo', 'yum', 'install', '-y', 'epel-release'], check=True)
+                subprocess.run(['sudo', 'yum', 'install', '-y', 'nginx'], check=True)
+            else:
+                print("⚠️ 无法安装nginx")
+                return False
+        
+        # 2. 找到nginx Web目录
+        nginx_web_dirs = ["/var/www/html", "/usr/share/nginx/html", "/var/www"]
+        nginx_web_dir = None
+        for dir_path in nginx_web_dirs:
+            if os.path.exists(dir_path):
+                nginx_web_dir = dir_path
+                break
+        
+        if not nginx_web_dir:
+            nginx_web_dir = "/var/www/html"
+            subprocess.run(['sudo', 'mkdir', '-p', nginx_web_dir], check=True)
+        
+        # 3. 复制Web文件
+        print("📝 部署Web伪装文件...")
+        create_web_files_in_directory(nginx_web_dir)
+        set_nginx_permissions(nginx_web_dir)
+        
+        # 4. 配置nginx SSL
+        ssl_conf = f"""server {{
+    listen 443 ssl;
+    listen [::]:443 ssl;
+    server_name _;
+    
+    ssl_certificate {os.path.abspath(cert_path)};
+    ssl_certificate_key {os.path.abspath(key_path)};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384;
+    
+    root {nginx_web_dir};
+    index index.html;
+    
+    location / {{
+        try_files $uri $uri/ /index.html;
+    }}
+    
+    server_tokens off;
+    add_header X-Frame-Options DENY always;
+    add_header X-Content-Type-Options nosniff always;
+}}
+
+server {{
+    listen 80;
+    listen [::]:80;
+    server_name _;
+    return 301 https://$server_name$request_uri;
+}}"""
+        
+        # 5. 写入nginx配置
+        ssl_conf_file = "/etc/nginx/conf.d/hysteria2-ssl.conf"
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.conf') as tmp:
+            tmp.write(ssl_conf)
+            tmp.flush()
+            subprocess.run(['sudo', 'cp', tmp.name, ssl_conf_file], check=True)
+            os.unlink(tmp.name)
+        
+        # 6. 测试并重启nginx
+        test_result = subprocess.run(['sudo', 'nginx', '-t'], capture_output=True, text=True)
+        if test_result.returncode != 0:
+            print(f"❌ nginx配置错误: {test_result.stderr}")
+            return False
+        
+        subprocess.run(['sudo', 'systemctl', 'restart', 'nginx'], check=True)
+        subprocess.run(['sudo', 'systemctl', 'enable', 'nginx'], check=True)
+        
+        print("✅ nginx Web伪装配置完成")
+        return True
+        
+    except Exception as e:
+        print(f"❌ nginx配置失败: {e}")
+        return False
+
+def enable_bbr_optimization():
+    """启用BBR拥塞控制算法优化网络性能"""
+    try:
+        print("🚀 正在启用BBR拥塞控制算法...")
+        
+        # 检查当前拥塞控制算法
+        try:
+            with open('/proc/sys/net/ipv4/tcp_congestion_control', 'r') as f:
+                current_cc = f.read().strip()
+            print(f"📊 当前拥塞控制算法: {current_cc}")
+            
+            if current_cc == 'bbr':
+                print("✅ BBR已经启用")
+                return True
+        except:
+            pass
+        
+        # 检查内核版本
+        try:
+            result = subprocess.run(['uname', '-r'], capture_output=True, text=True)
+            kernel_version = result.stdout.strip()
+            print(f"🔍 内核版本: {kernel_version}")
+            
+            # BBR需要内核版本 >= 4.9
+            version_parts = kernel_version.split('.')
+            major = int(version_parts[0])
+            minor = int(version_parts[1].split('-')[0])
+            
+            if major < 4 or (major == 4 and minor < 9):
+                print(f"⚠️ BBR需要内核版本 >= 4.9，当前版本: {kernel_version}")
+                print("建议升级内核或使用其他优化方案")
+                return False
+        except:
+            print("⚠️ 无法检测内核版本")
+        
+        # 检查BBR模块是否可用
+        try:
+            result = subprocess.run(['modprobe', 'tcp_bbr'], check=False, capture_output=True)
+            if result.returncode == 0:
+                print("✅ BBR模块加载成功")
+            else:
+                print("⚠️ BBR模块加载失败，可能不支持")
+        except:
+            pass
+        
+        # 配置BBR
+        bbr_config = """# BBR拥塞控制优化配置
+net.core.default_qdisc = fq
+net.ipv4.tcp_congestion_control = bbr
+
+# 网络性能优化
+net.core.rmem_max = 134217728
+net.core.wmem_max = 134217728
+net.core.netdev_max_backlog = 5000
+net.ipv4.tcp_rmem = 4096 87380 134217728
+net.ipv4.tcp_wmem = 4096 65536 134217728
+net.ipv4.tcp_mtu_probing = 1
+net.ipv4.tcp_congestion_control = bbr
+
+# UDP优化（Hysteria2使用UDP）
+net.core.rmem_default = 262144
+net.core.rmem_max = 16777216
+net.core.wmem_default = 262144
+net.core.wmem_max = 16777216
+net.core.netdev_max_backlog = 5000
+"""
+        
+        # 写入sysctl配置
+        sysctl_file = "/etc/sysctl.d/99-hysteria2-bbr.conf"
+        try:
+            import tempfile
+            with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.conf') as tmp:
+                tmp.write(bbr_config)
+                tmp.flush()
+                subprocess.run(['sudo', 'cp', tmp.name, sysctl_file], check=True)
+                os.unlink(tmp.name)
+            
+            print(f"✅ BBR配置已写入: {sysctl_file}")
+        except Exception as e:
+            print(f"❌ 写入BBR配置失败: {e}")
+            return False
+        
+        # 应用配置
+        try:
+            subprocess.run(['sudo', 'sysctl', '-p', sysctl_file], check=True)
+            print("✅ BBR配置已应用")
+        except Exception as e:
+            print(f"⚠️ 应用BBR配置失败: {e}")
+        
+        # 立即启用BBR
+        try:
+            subprocess.run(['sudo', 'sysctl', '-w', 'net.core.default_qdisc=fq'], check=True)
+            subprocess.run(['sudo', 'sysctl', '-w', 'net.ipv4.tcp_congestion_control=bbr'], check=True)
+            print("✅ BBR已立即生效")
+        except Exception as e:
+            print(f"⚠️ 立即启用BBR失败: {e}")
+        
+        # 验证BBR是否启用
+        try:
+            with open('/proc/sys/net/ipv4/tcp_congestion_control', 'r') as f:
+                current_cc = f.read().strip()
+            
+            if current_cc == 'bbr':
+                print("🎉 BBR拥塞控制算法启用成功！")
+                
+                # 显示可用的拥塞控制算法
+                try:
+                    with open('/proc/sys/net/ipv4/tcp_available_congestion_control', 'r') as f:
+                        available_cc = f.read().strip()
+                    print(f"📋 可用算法: {available_cc}")
+                except:
+                    pass
+                
+                return True
+            else:
+                print(f"⚠️ BBR启用失败，当前算法: {current_cc}")
+                return False
+                
+        except Exception as e:
+            print(f"❌ 验证BBR状态失败: {e}")
+            return False
+            
+    except Exception as e:
+        print(f"❌ BBR优化失败: {e}")
+        return False
+
+def parse_port_range(port_range_str):
+    """解析端口范围字符串"""
+    try:
+        if not port_range_str:
+            return None, None
+        
+        if '-' not in port_range_str:
+            print(f"❌ 端口范围格式错误: {port_range_str}")
+            print("正确格式: 起始端口-结束端口，如: 28888-29999")
+            return None, None
+        
+        start_str, end_str = port_range_str.split('-', 1)
+        start_port = int(start_str.strip())
+        end_port = int(end_str.strip())
+        
+        # 验证端口范围
+        if start_port < 1024 or end_port > 65535:
+            print(f"❌ 端口范围超出有效范围 (1024-65535): {start_port}-{end_port}")
+            return None, None
+        
+        if start_port >= end_port:
+            print(f"❌ 起始端口必须小于结束端口: {start_port}-{end_port}")
+            return None, None
+        
+        if end_port - start_port > 10000:
+            print(f"⚠️ 端口范围过大 ({end_port - start_port} 个端口)，建议控制在10000以内")
+            user_input = input("是否继续? (y/n): ").lower()
+            if user_input != 'y':
+                return None, None
+        
+        print(f"✅ 端口范围解析成功: {start_port}-{end_port} (共 {end_port - start_port + 1} 个端口)")
+        return start_port, end_port
+        
+    except ValueError:
+        print(f"❌ 端口范围格式错误: {port_range_str}")
+        print("正确格式: 起始端口-结束端口，如: 28888-29999")
+        return None, None
+    except Exception as e:
+        print(f"❌ 解析端口范围失败: {e}")
+        return None, None
 
 if __name__ == "__main__":
     main() 
