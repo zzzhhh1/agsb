@@ -12,6 +12,8 @@ import socket
 import time
 import argparse
 from pathlib import Path
+import base64
+import random
 
 def get_user_home():
     """获取用户主目录"""
@@ -1029,7 +1031,7 @@ def create_config(base_dir, port, password, cert_path, key_path, domain, enable_
         config["quic"] = {
             "initStreamReceiveWindow": 8388608,
             "maxStreamReceiveWindow": 8388608,
-            "initConnReceiveWindow": 20971520,  
+            "initConnReceiveWindow": 20971520,
             "maxConnReceiveWindow": 20971520,
             "maxIdleTimeout": "30s",
             "maxIncomingStreams": 1024,
@@ -1124,60 +1126,70 @@ fi
     return script_path
 
 def delete_hysteria2():
-    """完全删除Hysteria2安装和所有配置"""
+    """完整删除Hysteria2安装的5步流程"""
+    print("🗑️ 开始完整删除Hysteria2...")
+    print("📋 删除流程: 停止服务 → 清理iptables → 清理nginx → 删除目录 → 清理服务")
+    
     home = get_user_home()
     base_dir = f"{home}/.hysteria2"
-    current_user = os.getenv('USER', 'unknown')
-    
-    print("🗑️ 开始完全删除Hysteria2和所有相关配置...")
-    print(f"当前用户: {current_user}")
-    print(f"检查安装目录: {base_dir}")
     
     if not os.path.exists(base_dir):
-        print("⚠️ 当前用户下未找到Hysteria2安装目录")
-        
-        # 检查是否有其他用户的hysteria在运行
-        try:
-            result = subprocess.run(['sudo', 'ss', '-anup'], capture_output=True, text=True)
-            if 'hysteria' in result.stdout:
-                print("\n🔍 检测到系统中有Hysteria2进程在运行:")
-                for line in result.stdout.split('\n'):
-                    if 'hysteria' in line:
-                        print(f"  {line}")
-                print("\n如需删除其他用户的安装，请切换到对应用户执行删除操作")
-            else:
-                print("✅ 系统中未检测到Hysteria2进程")
-        except:
-            print("⚠️ 无法检查系统进程（权限不足）")
-    else:
-        print(f"✅ 找到安装目录: {base_dir}")
+        print("⚠️ Hysteria2 未安装或已被删除")
+        return True
     
     # 1. 停止Hysteria2服务
     print("\n🛑 步骤1: 停止Hysteria2服务")
     try:
-        # 尝试使用停止脚本
-        stop_script = f"{base_dir}/stop.sh"
-        if os.path.exists(stop_script):
-            subprocess.run([stop_script], check=True)
-            print("✅ 使用停止脚本成功停止服务")
+        pid_file = f"{base_dir}/hysteria.pid"
         
-        # 强制终止所有hysteria进程
+        if os.path.exists(pid_file):
+            try:
+                with open(pid_file, 'r') as f:
+                    pid = f.read().strip()
+                if pid:
+                    try:
+                        os.kill(int(pid), 15)  # SIGTERM
+                        time.sleep(2)
+                        print(f"✅ 已停止Hysteria2进程 (PID: {pid})")
+                    except ProcessLookupError:
+                        print("⚠️ 进程已不存在")
+                    except Exception as e:
+                        print(f"⚠️ 停止进程失败: {e}")
+                        try:
+                            os.kill(int(pid), 9)  # SIGKILL
+                            print("✅ 强制终止进程成功")
+                        except:
+                            pass
+            except Exception as e:
+                print(f"⚠️ 读取PID文件失败: {e}")
+        
+        # 查找并停止所有hysteria进程
         try:
-            subprocess.run(['sudo', 'pkill', '-f', 'hysteria'], check=False)
-            print("✅ 强制终止所有hysteria进程")
+            result = subprocess.run(['pgrep', '-f', 'hysteria'], capture_output=True, text=True)
+            if result.stdout.strip():
+                pids = result.stdout.strip().split('\n')
+                for pid in pids:
+                    try:
+                        subprocess.run(['sudo', 'kill', '-15', pid], check=True)
+                        print(f"✅ 已停止hysteria进程: {pid}")
+                    except:
+                        try:
+                            subprocess.run(['sudo', 'kill', '-9', pid], check=True)
+                        except:
+                            pass
         except:
             pass
             
     except Exception as e:
-        print(f"⚠️ 停止服务时出错: {e}")
+        print(f"⚠️ 停止服务失败: {e}")
     
     # 2. 清理iptables规则
-    print("\n🔧 步骤2: 清理iptables端口跳跃规则")
+    print("\n🔧 步骤2: 清理iptables规则")
     try:
-        # 读取配置文件获取端口信息
-        config_path = f"{base_dir}/config/config.json"
         port_ranges = []
         
+        # 从配置文件读取端口信息
+        config_path = f"{base_dir}/config/config.json"
         if os.path.exists(config_path):
             try:
                 with open(config_path, 'r') as f:
@@ -1195,7 +1207,7 @@ def delete_hysteria2():
                 print(f"📋 从配置文件读取端口信息: {port_start}-{port_end} → {listen_port}")
             except:
                 pass
-        
+    
         # 添加常见端口范围以确保清理完整
         common_ranges = [
             (1024, 1074, 443),
@@ -1303,7 +1315,7 @@ def delete_hysteria2():
                 print(f"⚠️ nginx配置测试失败: {test_result.stderr}")
         except:
             print("⚠️ nginx重新加载失败")
-            
+                
     except Exception as e:
         print(f"⚠️ 清理nginx配置失败: {e}")
     
@@ -1315,7 +1327,7 @@ def delete_hysteria2():
             print(f"✅ 已删除安装目录: {base_dir}")
         else:
             print("⚠️ 安装目录不存在")
-            
+        
     except Exception as e:
         print(f"❌ 删除安装目录失败: {e}")
     
@@ -1572,9 +1584,7 @@ def create_nginx_masquerade(base_dir, domain, web_dir):
     # SSL配置
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers ECDHE-RSA-AES128-GCM-SHA256:ECDHE-RSA-AES256-GCM-SHA384;
-    ssl_prefer_server_ciphers off;
     
-    # 网站根目录 (使用绝对路径)
     root {abs_web_dir};
     index index.html index.htm;
     
@@ -1720,7 +1730,7 @@ def setup_dual_port_masquerade(base_dir, domain, web_dir, cert_path, key_path):
                     src_file = os.path.join(web_dir, file)
                     if os.path.isfile(src_file):
                         subprocess.run(['sudo', 'cp', src_file, nginx_web_dir], check=True)
-                print(f"✅ 伪装文件已复制到: {nginx_web_dir}")
+            print(f"✅ 伪装文件已复制到: {nginx_web_dir}")
         else:
             print(f"⚠️ 原Web目录不存在，直接在nginx目录创建伪装文件...")
             create_web_files_in_directory(nginx_web_dir)
@@ -1800,128 +1810,24 @@ server {{
 
 def show_client_setup(config_link, server_address, port, password, use_real_cert, enable_port_hopping=False, obfs_password=None, enable_http3_masquerade=False):
     """显示客户端连接指南"""
-    insecure_text = "否" if use_real_cert else "是"
-    
-    # 构建功能描述
-    features = []
+    # 构建端口范围
+    port_range = None
     if enable_port_hopping:
-        features.append("端口跳跃")
-    if obfs_password:
-        features.append("Salamander混淆")
-    if enable_http3_masquerade:
-        features.append("HTTP/3伪装")
+        port_start = max(1024, port-50)
+        port_end = min(65535, port+50)
+        port_range = f"{port_start}-{port_end}"
     
-    feature_text = " + ".join(features) if features else "标准模式"
-    
-    print(f"""
-📱 客户端连接指南
-
-🔗 一键导入链接:
-{config_link}
-
-📋 手动配置参数:
-服务器地址: {server_address}
-端口: {port if not enable_port_hopping else f"{max(1024, port-50)}-{min(65535, port+50)}"} (UDP协议)
-密码: {password}
-协议: Hysteria2
-防墙功能: {feature_text}
-TLS: 启用
-跳过证书验证: {insecure_text}
-SNI: {server_address}
-{'混淆密码: ' + obfs_password if obfs_password else ''}
-
-⚠️ 重要提醒: 
-- Hysteria2使用UDP协议，确保防火墙已开放UDP端口
-{'- 端口跳跃模式：需要开放端口范围 ' + str(max(1024, port-50)) + '-' + str(min(65535, port+50)) if enable_port_hopping else ''}
-{'- Salamander混淆：客户端必须填写相同的混淆密码' if obfs_password else ''}
-{'- HTTP/3伪装：流量看起来像正常HTTP/3网站访问' if enable_http3_masquerade else ''}
-
-💻 客户端配置示例:
-
-1️⃣ v2rayN (Windows) 配置:
-   - 服务器地址: {server_address}
-   - 端口: {port if not enable_port_hopping else f"{max(1024, port-50)}-{min(65535, port+50)}"}
-   - 密码: {password}
-   - 协议: Hysteria2
-   {'- 混淆密码: ' + obfs_password if obfs_password else ''}
-
-2️⃣ Clash Meta 配置文件:
-```yaml
-proxies:
-  - name: "Hysteria2"
-    type: hysteria2
-    server: {server_address}
-    port: {port if not enable_port_hopping else f"{max(1024, port-50)}-{min(65535, port+50)}"}
-    password: {password}
-{'    obfs:' if obfs_password else ''}
-{'      type: salamander' if obfs_password else ''}
-{'      salamander:' if obfs_password else ''}
-{'        password: "' + obfs_password + '"' if obfs_password else ''}
-    tls: true
-    skip-cert-verify: {str(not use_real_cert).lower()}
-```
-
-3️⃣ Linux客户端配置 (config.json):
-```json
-{{
-  "server": "{server_address}:{port if not enable_port_hopping else f"{max(1024, port-50)}-{min(65535, port+50)}"}",
-  "auth": "{password}",
-{'  "obfs": {{' if obfs_password else ''}
-{'    "type": "salamander",' if obfs_password else ''}
-{'    "salamander": {{' if obfs_password else ''}
-{'      "password": "' + obfs_password + '"' if obfs_password else ''}
-{'    }}' if obfs_password else ''}
-{'  }},' if obfs_password else ''}
-  "tls": {{
-    "sni": "{server_address}",
-    "insecure": {"true" if not use_real_cert else "false"}
-  }},
-  "socks5": {{
-    "listen": "127.0.0.1:1080"
-  }},
-  "http": {{
-    "listen": "127.0.0.1:8080"
-  }}
-}}
-```
-
-🔧 连接测试:
-
-1. 导入配置后，启动客户端
-2. 选择刚添加的Hysteria2节点
-3. 访问 https://www.google.com 测试连接
-4. 检查IP: https://ipinfo.io 确认IP已变更
-
-⚠️ 常见问题:
-
-Q: 连接失败怎么办?
-A: 1. 检查服务器防火墙是否开放UDP端口
-   {'2. 端口跳跃模式需要开放端口范围：' + str(max(1024, port-50)) + '-' + str(min(65535, port+50)) if enable_port_hopping else '2. 确认端口' + str(port) + '未被占用'}
-   {'3. 确认混淆密码与服务器一致：' + obfs_password if obfs_password else '3. 尝试关闭客户端防病毒软件'}
-
-Q: 端口跳跃的优势?
-A: 1. 防止单一端口被封锁
-   2. 增加检测和封锁难度
-   3. 提高连接稳定性
-
-Q: HTTP/3伪装的作用?
-A: 1. 流量看起来像正常HTTP/3网站访问
-   2. 降低被DPI识别的概率
-   3. 提高隐蔽性
-
-🎯 性能对比:
-- 标准模式: 速度最快，延迟最低
-- 端口跳跃: 稳定性高，防封锁强
-- 混淆模式: 隐蔽性强，轻微性能损失
-- HTTP/3伪装: 最佳流量隐蔽性
-
-🌟 使用场景:
-{'• 端口跳跃: 适合经常封端口的网络环境' if enable_port_hopping else '• 标准模式: 适合大部分网络环境'}
-{'• 混淆模式: 适合有DPI检测的网络环境' if obfs_password else ''}
-{'• HTTP/3伪装: 适合严格审查的网络环境' if enable_http3_masquerade else ''}
-
-连接成功后即可享受高速稳定的网络体验！
-""")
+    # 使用统一输出函数
+    show_final_summary(
+        server_address=server_address,
+        port=port,
+        port_range=port_range,
+        password=password,
+        obfs_password=obfs_password,
+        config_link=config_link,
+        enable_port_hopping=enable_port_hopping,
+        download_links=None
+    )
 
 def main():
     parser = argparse.ArgumentParser(description='Hysteria2 一键部署工具（防墙增强版）')
@@ -2533,6 +2439,26 @@ def setup_port_hopping_iptables(port_start, port_end, listen_port):
             '-j', 'DNAT', '--to-destination', f':{listen_port}'
         ], check=True)
         
+        # 确保基本的iptables规则存在
+        # 允许已建立的连接和相关连接
+        subprocess.run([
+            'sudo', 'iptables', '-I', 'INPUT', '1',
+            '-m', 'conntrack', '--ctstate', 'ESTABLISHED,RELATED',
+            '-j', 'ACCEPT'
+        ], check=False)
+        
+        # 允许本地回环
+        subprocess.run([
+            'sudo', 'iptables', '-I', 'INPUT', '2',
+            '-i', 'lo', '-j', 'ACCEPT'
+        ], check=False)
+        
+        # 允许SSH端口（防止锁定）
+        subprocess.run([
+            'sudo', 'iptables', '-I', 'INPUT', '3',
+            '-p', 'tcp', '--dport', '22', '-j', 'ACCEPT'
+        ], check=False)
+        
         # 开放端口范围的防火墙规则
         subprocess.run([
             'sudo', 'iptables', '-A', 'INPUT', 
@@ -2546,6 +2472,17 @@ def setup_port_hopping_iptables(port_start, port_end, listen_port):
             '-p', 'udp', '--dport', str(listen_port), 
             '-j', 'ACCEPT'
         ], check=True)
+        
+        # 开放HTTP和HTTPS端口（nginx）
+        subprocess.run([
+            'sudo', 'iptables', '-A', 'INPUT',
+            '-p', 'tcp', '--dport', '80', '-j', 'ACCEPT'
+        ], check=False)
+        
+        subprocess.run([
+            'sudo', 'iptables', '-A', 'INPUT',
+            '-p', 'tcp', '--dport', '443', '-j', 'ACCEPT'
+        ], check=False)
         
         # 尝试保存iptables规则
         try:
@@ -2604,7 +2541,7 @@ def deploy_hysteria2_complete(server_address, port=443, password="123qwe!@#QWE",
     print(f"✅ 创建Web伪装：{web_dir}")
     
     # 6. 创建Hysteria2配置（端口跳跃+混淆+HTTP/3伪装）
-    config = {
+    hysteria_config = {
         "listen": f":{port}",
         "tls": {
             "cert": cert_path,
@@ -2640,7 +2577,7 @@ def deploy_hysteria2_complete(server_address, port=443, password="123qwe!@#QWE",
     
     config_path = f"{base_dir}/config/config.json"
     with open(config_path, "w") as f:
-        json.dump(config, f, indent=2)
+        json.dump(hysteria_config, f, indent=2)
     print(f"✅ 创建配置：{config_path}")
     
     # 7. 配置端口跳跃（iptables）
@@ -2694,44 +2631,280 @@ def deploy_hysteria2_complete(server_address, port=443, password="123qwe!@#QWE",
         f"obfs-password={urllib.parse.quote(obfs_password)}"
     ]
     
+    # 生成标准的单端口配置链接（兼容性最好）
     config_link = f"hysteria2://{urllib.parse.quote(password)}@{server_address}:{port}?{'&'.join(params)}"
     
+    # 如果启用了端口跳跃，生成额外的JSON配置
+    if port_range:
+        port_hopping_config = {
+            "server": server_address,
+            "auth": password,
+            "obfs": {
+                "type": "salamander",
+                "salamander": {
+                    "password": obfs_password
+                }
+            },
+            "tls": {
+                "sni": server_address,
+                "insecure": insecure == "1"
+            },
+            "transport": {
+                "type": "udp",
+                "udp": {
+                    "hopPorts": f"{port_start}-{port_end}"
+                }
+            }
+        }
+    
     # 12. 输出部署结果
-    print(f"""
-🎉 Hysteria2完整部署成功！
+    if port_range:
+        # 准备下载链接
+        download_links = {
+            "v2rayN多端口订阅 (推荐)": f"http://{server_address}:8080/v2rayn-subscription.txt",
+            "多端口配置明文查看": f"http://{server_address}:8080/multi-port-links.txt",
+            "Clash多端口配置": f"http://{server_address}:8080/clash.yaml", 
+            "官方客户端配置": f"http://{server_address}:8080/hysteria-official.yaml",
+            "JSON配置 (完整功能)": f"http://{server_address}:8080/hysteria2.json"
+        }
+        
+        # 生成多端口配置（v2rayN和Clash使用相同的端口列表）
+        print(f"\n🔄 生成多端口配置文件...")
+        
+        # 计算端口范围和选择端口
+        import random
+        port_range = list(range(port_start, port_end + 1))
+        num_configs = 100
+        
+        if len(port_range) > num_configs:
+            selected_ports = random.sample(port_range, num_configs)
+        else:
+            selected_ports = port_range
+        
+        selected_ports.sort()  # 排序便于查看
+        num_ports = len(selected_ports)
+        
+        # 生成v2rayN订阅文件
+        subscription_file, subscription_plain_file, _ = generate_multi_port_subscription(
+            server_address, password, obfs_password, port_start, port_end, base_dir, num_configs=100
+        )
+        print(f"✅ 已生成 {num_ports} 个端口的配置节点")
+        
+        # 使用统一输出函数
+        show_final_summary(
+            server_address=server_address,
+            port=port,
+            port_range=f"{port_start}-{port_end}",
+            password=password,
+            obfs_password=obfs_password,
+            config_link=config_link,
+            enable_port_hopping=True,
+            download_links=download_links,
+            num_ports=num_ports
+        )
+        
+        # 保存JSON配置文件
+        config_file = f"{base_dir}/client-config.json"
+        with open(config_file, 'w') as f:
+            json.dump(port_hopping_config, f, indent=2)
+        print(f"📄 端口跳跃JSON配置已保存到：{config_file}")
+        
+        # 生成v2rayN兼容配置（单一端口，因为v2rayN不支持端口跳跃）
+        v2rayn_config = f"""# Hysteria2 v2rayN兼容配置 - 单一端口版本
+# 注意：v2rayN不支持端口跳跃功能，只能使用服务器的主监听端口
+# 使用方法：将此配置导入v2rayN客户端
 
-📡 服务器信息：
-- 地址：{server_address}
-- 监听端口：{port} (UDP)
-- 客户端端口范围：{port_start}-{port_end}
-- 密码：{password}
-- 混淆密码：{obfs_password}
+server: {server_address}:{port}
+auth: {password}
 
-🔗 客户端链接：
-{config_link}
+obfs:
+  type: salamander
+  salamander:
+    password: {obfs_password}
 
-🛡️ 防护特性：
-✅ 端口跳跃：{port_start}-{port_end} → {port}
-✅ Salamander混淆：{obfs_password}
-✅ HTTP/3伪装：模拟正常HTTP/3流量
-✅ nginx Web伪装：TCP 443显示正常网站
+tls:
+  sni: {server_address}
+  insecure: true
 
-💻 客户端配置示例：
-服务器：{server_address}
-端口：{port_start}-{port_end}
-密码：{password}
-混淆密码：{obfs_password}
-协议：Hysteria2
-TLS：启用，跳过验证
+bandwidth:
+  up: 50 mbps
+  down: 200 mbps
 
-🔧 测试命令：
-- 测试Hysteria2：使用客户端连接
-- 测试Web伪装：curl -k https://{server_address}
+socks5:
+  listen: 127.0.0.1:1080
 
-⚠️ 防火墙要求：
-- 开放UDP端口范围：{port_start}-{port_end}
-- 开放TCP端口：{port} (nginx)
-""")
+http:
+  listen: 127.0.0.1:8080
+"""
+        
+        # 生成Hysteria2官方客户端YAML配置（正确的端口跳跃格式）
+        hysteria_official_config = f"""# Hysteria2 官方客户端配置 - 端口跳跃版本
+# 支持端口跳跃功能，提供更好的防封锁能力
+# 使用方法：保存为 config.yaml，然后运行 hysteria client -c config.yaml
+
+server: {server_address}:{port}
+auth: {password}
+
+transport:
+  type: udp
+  udp:
+    hopInterval: 30s
+
+obfs:
+  type: salamander
+  salamander:
+    password: {obfs_password}
+
+tls:
+  sni: {server_address}
+  insecure: true
+
+bandwidth:
+  up: 50 mbps
+  down: 200 mbps
+
+socks5:
+  listen: 127.0.0.1:1080
+
+http:
+  listen: 127.0.0.1:8080
+
+# 端口跳跃说明：
+# Hysteria2端口跳跃有两种实现方式：
+# 1. 服务器端iptables DNAT: 将{port_start}-{port_end}流量转发到{port}
+# 2. 客户端多端口连接: 客户端在{port_start}-{port_end}范围内随机选择端口连接
+# 
+# 当前配置使用方式1，保持客户端配置简洁
+# 如需使用方式2，请将server改为: {server_address}:{port_start}-{port_end}
+"""
+        
+        # 生成Clash多端口配置（与v2rayN相同的多节点方案）
+        clash_proxies = []
+        clash_proxy_names = []
+        
+        # 生成多个端口的Clash节点配置
+        for i, port_num in enumerate(selected_ports, 1):
+            node_name = f"Hysteria2-端口{port_num}-节点{i:02d}"
+            clash_proxy_names.append(node_name)
+            clash_proxies.append(f"""  - name: "{node_name}"
+    type: hysteria2
+    server: {server_address}
+    port: {port_num}
+    password: "{password}"
+    obfs: salamander
+    obfs-password: "{obfs_password}"
+    sni: {server_address}
+    skip-cert-verify: true
+    fast-open: true""")
+        
+        clash_config = f"""# Clash Meta Hysteria2 多端口配置
+# 包含{len(selected_ports)}个不同端口的节点，支持手动切换端口
+# 使用方法：导入到Clash Meta客户端，在节点列表中选择不同端口
+
+mixed-port: 7890
+allow-lan: false
+bind-address: '*'
+mode: rule
+log-level: info
+external-controller: '127.0.0.1:9090'
+
+proxies:
+{chr(10).join(clash_proxies)}
+    
+proxy-groups:
+  - name: "🚀 节点选择"
+    type: select
+    proxies:
+{chr(10).join([f'      - "{name}"' for name in clash_proxy_names])}
+      - DIRECT
+      
+  - name: "🌍 国外网站"
+    type: select
+    proxies:
+      - "🚀 节点选择"
+      - DIRECT
+      
+rules:
+  - DOMAIN-SUFFIX,google.com,🌍 国外网站
+  - DOMAIN-SUFFIX,youtube.com,🌍 国外网站
+  - DOMAIN-SUFFIX,github.com,🌍 国外网站
+  - DOMAIN-SUFFIX,openai.com,🌍 国外网站
+  - DOMAIN-SUFFIX,chatgpt.com,🌍 国外网站
+  - GEOIP,CN,DIRECT
+  - MATCH,🚀 节点选择
+"""
+        
+        # 生成真正的客户端端口跳跃配置（可选）
+        hysteria_client_hopping_config = f"""# Hysteria2 客户端端口跳跃配置
+# 这个配置让客户端真正实现端口跳跃（随机选择端口连接）
+# 使用方法：保存为 hopping.yaml，运行 hysteria client -c hopping.yaml
+
+server: {server_address}:{port_start}-{port_end}
+auth: {password}
+
+transport:
+  type: udp
+  udp:
+    hopInterval: 30s
+
+obfs:
+  type: salamander
+  salamander:
+    password: {obfs_password}
+
+tls:
+  sni: {server_address}
+  insecure: true
+
+bandwidth:
+  up: 50 mbps
+  down: 200 mbps
+
+socks5:
+  listen: 127.0.0.1:1080
+
+http:
+  listen: 127.0.0.1:8080
+
+# 此配置需要服务器端开放{port_start}-{port_end}端口范围
+# 每个端口都需要独立的Hysteria2服务实例或负载均衡配置
+"""
+
+        # 保存YAML配置文件
+        v2rayn_file = f"{base_dir}/v2rayn-config.yaml"
+        clash_file = f"{base_dir}/clash-config.yaml"
+        hysteria_official_file = f"{base_dir}/hysteria-official-config.yaml"
+        hysteria_client_hopping_file = f"{base_dir}/hysteria-client-hopping.yaml"
+        
+        with open(v2rayn_file, 'w', encoding='utf-8') as f:
+            f.write(v2rayn_config)
+        with open(clash_file, 'w', encoding='utf-8') as f:
+            f.write(clash_config)
+        with open(hysteria_official_file, 'w', encoding='utf-8') as f:
+            f.write(hysteria_official_config)
+        with open(hysteria_client_hopping_file, 'w', encoding='utf-8') as f:
+            f.write(hysteria_client_hopping_config)
+            
+        print(f"📄 v2rayN配置已保存到：{v2rayn_file}")
+        print(f"📄 Clash配置已保存到：{clash_file}")
+        print(f"📄 官方客户端配置已保存到：{hysteria_official_file}")
+        print(f"📄 客户端端口跳跃配置已保存到：{hysteria_client_hopping_file}")
+        
+        # 复制配置文件到nginx Web目录，提供下载
+        setup_config_download_service(server_address, v2rayn_file, clash_file, hysteria_official_file, hysteria_client_hopping_file, subscription_file, subscription_plain_file, config_file)
+        
+    else:
+        # 使用统一输出函数
+        show_final_summary(
+            server_address=server_address,
+            port=port,
+            port_range=None,
+            password=password,
+            obfs_password=obfs_password,
+            config_link=config_link,
+            enable_port_hopping=False,
+            download_links=None
+        )
     
     return {
         "server": server_address,
@@ -2963,6 +3136,98 @@ net.core.netdev_max_backlog = 5000
         print(f"❌ BBR优化失败: {e}")
         return False
 
+def setup_config_download_service(server_address, v2rayn_file, clash_file, hysteria_official_file, hysteria_client_hopping_file, subscription_file, subscription_plain_file, json_file):
+    """设置配置文件下载服务 - 完全自动化"""
+    try:
+        print("🌐 设置配置文件下载服务...")
+        
+        # 获取base_dir
+        base_dir = os.path.expanduser("~/.hysteria2")
+        
+        # 创建配置文件目录
+        config_dir = f"{base_dir}/configs"
+        subprocess.run(['mkdir', '-p', config_dir], check=True)
+        
+        # 复制配置文件
+        subprocess.run(['cp', v2rayn_file, f'{config_dir}/v2rayn.yaml'], check=True)
+        subprocess.run(['cp', clash_file, f'{config_dir}/clash.yaml'], check=True)
+        subprocess.run(['cp', hysteria_official_file, f'{config_dir}/hysteria-official.yaml'], check=True)
+        subprocess.run(['cp', hysteria_client_hopping_file, f'{config_dir}/hysteria-client-hopping.yaml'], check=True)
+        subprocess.run(['cp', subscription_file, f'{config_dir}/v2rayn-subscription.txt'], check=True)
+        subprocess.run(['cp', subscription_plain_file, f'{config_dir}/multi-port-links.txt'], check=True)
+        subprocess.run(['cp', json_file, f'{config_dir}/hysteria2.json'], check=True)
+        
+        # 直接启动Python HTTP服务器（不使用systemd）
+        print("🔧 启动Python HTTP服务器...")
+        
+        # 创建HTTP服务器脚本
+        server_script = f'''#!/usr/bin/env python3
+import os
+import http.server
+import socketserver
+from urllib.parse import urlparse
+
+class ConfigHandler(http.server.SimpleHTTPRequestHandler):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, directory="{config_dir}", **kwargs)
+    
+    def end_headers(self):
+        if self.path.endswith(('.yaml', '.yml', '.json')):
+            filename = os.path.basename(self.path)
+            self.send_header('Content-Disposition', f'attachment; filename="{{filename}}"')
+            self.send_header('Content-Type', 'application/octet-stream')
+        super().end_headers()
+    
+    def log_message(self, format, *args):
+        pass
+
+if __name__ == "__main__":
+    PORT = 8080
+    try:
+        with socketserver.TCPServer(("", PORT), ConfigHandler) as httpd:
+            print(f"HTTP服务器已启动，端口: {{PORT}}")
+            httpd.serve_forever()
+    except Exception as e:
+        print(f"服务器启动失败: {{e}}")
+        exit(1)
+'''
+        
+        # 保存并启动服务器
+        server_file = f"{base_dir}/config_server.py"
+        with open(server_file, 'w', encoding='utf-8') as f:
+            f.write(server_script)
+        subprocess.run(['chmod', '+x', server_file], check=True)
+        
+        # 开放防火墙端口（8080用于配置下载）
+        subprocess.run(['sudo', 'iptables', '-A', 'INPUT', '-p', 'tcp', '--dport', '8080', '-j', 'ACCEPT'], check=False)
+        
+        # 在后台启动HTTP服务器
+        subprocess.Popen(['python3', server_file], cwd=base_dir)
+        
+        # 等待服务启动
+        time.sleep(3)
+        
+        # 验证服务是否启动
+        try:
+            import socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(2)
+            result = sock.connect_ex(('127.0.0.1', 8080))
+            sock.close()
+            if result == 0:
+                print("✅ Python HTTP服务器启动成功")
+                return True
+            else:
+                print("⚠️ HTTP服务器启动失败")
+                return False
+        except Exception as e:
+            print(f"⚠️ 验证HTTP服务器失败: {e}")
+            return False
+        
+    except Exception as e:
+        print(f"⚠️ 设置配置下载服务失败: {e}")
+        return False
+
 def parse_port_range(port_range_str):
     """解析端口范围字符串"""
     try:
@@ -3003,6 +3268,135 @@ def parse_port_range(port_range_str):
     except Exception as e:
         print(f"❌ 解析端口范围失败: {e}")
         return None, None
+
+def show_final_summary(server_address, port, port_range, password, obfs_password, config_link, enable_port_hopping=False, download_links=None, num_ports=None):
+    """显示最终的完整摘要信息 - 包含下载链接、客户端链接和作者信息"""
+    
+    print("\n" + "="*80)
+    print("\033[36m┌──────────────────────────────────────────────────────────────────────────────┐\033[0m")
+    print("\033[36m│                            🎉 Hysteria2 部署完成！                             │\033[0m")
+    print("\033[36m└──────────────────────────────────────────────────────────────────────────────┘\033[0m")
+    
+    # 服务器信息
+    print("\n\033[33m📡 服务器信息:\033[0m")
+    print(f"   • 服务器地址: {server_address}")
+    print(f"   • 监听端口: {port} (UDP)")
+    if enable_port_hopping and port_range:
+        print(f"   • 客户端端口范围: {port_range}")
+    print(f"   • 连接密码: {password}")
+    if obfs_password:
+        print(f"   • 混淆密码: {obfs_password}")
+    
+    # 一键导入链接
+    print(f"\n\033[32m🔗 一键导入链接:\033[0m")
+    print(f"   {config_link}")
+    
+    # 配置文件下载链接（如果有）
+    if download_links:
+        print(f"\n\033[34m📥 配置文件下载:\033[0m")
+        for name, url in download_links.items():
+            print(f"   • {name}: {url}")
+        
+        print(f"\n\033[33m💡 客户端配置指南:\033[0m")
+        print("   🔹 v2rayN用户:")
+        print("     - 多端口订阅: 下载v2rayN多端口订阅 -> 添加订阅链接")
+        print("     - 手动导入: 下载多端口配置明文 -> 复制链接到v2rayN")
+        print("     - 单一端口: 下载v2rayN单一端口配置")
+        print("   🔹 Clash Meta用户:")
+        print("     - 多端口配置: 下载Clash多端口配置，包含多个端口节点")
+        print("   🔹 官方客户端用户:")
+        print("     - 使用官方客户端配置")
+        print(f"   🔹 多端口说明: 包含{num_ports}个不同端口节点，手动切换实现防封效果")
+    
+    # 防护特性
+    print(f"\n\033[35m🛡️ 防护特性:\033[0m")
+    if enable_port_hopping:
+        print(f"   ✅ 端口跳跃: {port_range} → {port} (服务器端DNAT实现)")
+    if obfs_password:
+        print(f"   ✅ Salamander混淆: {obfs_password}")
+    print("   ✅ HTTP/3伪装: 模拟正常HTTP/3流量")
+    print("   ✅ nginx Web伪装: TCP端口显示正常网站")
+    print("   ✅ UDP协议: 基于QUIC/HTTP3，抗封锁能力强")
+    
+    # 使用提醒
+    print(f"\n\033[31m⚠️ 使用提醒:\033[0m")
+    print("   • Hysteria2使用UDP协议，确保防火墙已开放UDP端口")
+    if enable_port_hopping and port_range:
+        print(f"   • 端口跳跃模式：需要开放UDP端口范围 {port_range}")
+    else:
+        print(f"   • 需要开放UDP端口 {port}")
+    print(f"   • nginx Web伪装需要开放TCP端口 {port}")
+    
+    # 作者信息
+    print("\n" + "="*80)
+    print("\033[36m┌──────────────────────────────────────────────────────────────────────────────┐\033[0m")
+    print("\033[36m│                                  作者信息                                      │\033[0m")
+    print("\033[36m├──────────────────────────────────────────────────────────────────────────────┤\033[0m")
+    print("\033[36m│ \033[32m作者: 康康                                                  \033[36m│\033[0m")
+    print("\033[36m│ \033[32mGithub: https://github.com/zhumengkang/                    \033[36m│\033[0m")
+    print("\033[36m│ \033[32mYouTube: https://www.youtube.com/@康康的V2Ray与Clash         \033[36m│\033[0m")
+    print("\033[36m│ \033[32mTelegram: https://t.me/+WibQp7Mww1k5MmZl                   \033[36m│\033[0m")
+    print("\033[36m└──────────────────────────────────────────────────────────────────────────────┘\033[0m")
+    print("="*80)
+    print("\n🎯 连接成功后即可享受高速稳定的网络体验！")
+    print("💡 如遇问题，请联系作者获取技术支持\n")
+
+def generate_multi_port_subscription(server_address, password, obfs_password, port_start, port_end, base_dir, num_configs=100):
+    """
+    生成多端口v2rayN订阅文件
+    为端口跳跃范围内的端口生成多个hysteria2配置
+    """
+    # 计算端口范围
+    port_range = list(range(port_start, port_end + 1))
+    
+    # 如果端口数量超过要生成的配置数量，随机选择
+    if len(port_range) > num_configs:
+        selected_ports = random.sample(port_range, num_configs)
+    else:
+        selected_ports = port_range
+    
+    selected_ports.sort()  # 排序便于查看
+    
+    # 生成多个hysteria2链接
+    hysteria2_links = []
+    
+    for i, port in enumerate(selected_ports, 1):
+        # 生成节点名称
+        node_name = f"Hysteria2-端口{port}-节点{i:02d}"
+        
+        # URL编码密码和混淆密码
+        import urllib.parse
+        encoded_password = urllib.parse.quote(password, safe='')
+        encoded_obfs_password = urllib.parse.quote(obfs_password, safe='')
+        encoded_node_name = urllib.parse.quote(node_name, safe='')
+        
+        # 生成hysteria2链接
+        hysteria2_url = f"hysteria2://{encoded_password}@{server_address}:{port}?insecure=1&sni={server_address}&obfs=salamander&obfs-password={encoded_obfs_password}#{encoded_node_name}"
+        hysteria2_links.append(hysteria2_url)
+    
+    # 创建v2rayN订阅内容（Base64编码）
+    subscription_content = "\n".join(hysteria2_links)
+    subscription_base64 = base64.b64encode(subscription_content.encode('utf-8')).decode('utf-8')
+    
+    # 保存订阅文件
+    subscription_file = f"{base_dir}/hysteria2-multi-port-subscription.txt"
+    with open(subscription_file, 'w', encoding='utf-8') as f:
+        f.write(subscription_base64)
+    
+    # 保存明文版本（便于查看）
+    subscription_plain_file = f"{base_dir}/hysteria2-multi-port-links.txt"
+    with open(subscription_plain_file, 'w', encoding='utf-8') as f:
+        f.write("# Hysteria2 多端口配置文件\n")
+        f.write(f"# 服务器: {server_address}\n")
+        f.write(f"# 端口范围: {port_start}-{port_end}\n")
+        f.write(f"# 生成节点数量: {len(selected_ports)}\n")
+        f.write(f"# 密码: {password}\n")
+        f.write(f"# 混淆密码: {obfs_password}\n")
+        f.write("\n# ===== 配置链接 =====\n\n")
+        for link in hysteria2_links:
+            f.write(link + "\n")
+    
+    return subscription_file, subscription_plain_file, len(selected_ports)
 
 if __name__ == "__main__":
     main() 
