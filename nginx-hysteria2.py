@@ -3270,6 +3270,7 @@ def parse_port_range(port_range_str):
         return None, None
 
 def show_final_summary(server_address, port, port_range, password, obfs_password, config_link, enable_port_hopping=False, download_links=None, num_ports=None):
+    import urllib.parse
     """显示最终的完整摘要信息 - 包含下载链接、客户端链接和作者信息"""
     
     print("\n" + "="*80)
@@ -3327,6 +3328,35 @@ def show_final_summary(server_address, port, port_range, password, obfs_password
         print(f"   • 需要开放UDP端口 {port}")
     print(f"   • nginx Web伪装需要开放TCP端口 {port}")
     
+    # 443端口地址 和 10个随机v2ray地址
+    print(f"\n\033[93m🎯 443端口连接地址:\033[0m")
+    hysteria_443_url = f"hysteria2://{urllib.parse.quote(password)}@{server_address}:443?insecure=1&sni={server_address}&obfs=salamander&obfs-password={urllib.parse.quote(obfs_password)}#Hysteria2-443"
+    print(f"   {hysteria_443_url}")
+    
+    print(f"\n\033[93m🔀 10个随机v2ray地址 (可直接复制):\033[0m")
+    random_ports = []
+    random_urls = []
+    if port_range and '-' in str(port_range):
+        # 从已生成的多端口配置中选择10个
+        import random
+        port_start, port_end = port_range.split('-')
+        port_list = list(range(int(port_start), int(port_end) + 1))
+        random_ports = random.sample(port_list, min(10, len(port_list)))
+        random_ports.sort()
+        
+        for i, random_port in enumerate(random_ports, 1):
+            random_url = f"hysteria2://{urllib.parse.quote(password)}@{server_address}:{random_port}?insecure=1&sni={server_address}&obfs=salamander&obfs-password={urllib.parse.quote(obfs_password)}#V2Ray-{random_port}-{i:02d}"
+            random_urls.append(random_url)
+            print(f"   {random_url}")
+        
+        # 生成Base64订阅格式
+        subscription_content = "\n".join(random_urls)
+        subscription_base64 = base64.b64encode(subscription_content.encode('utf-8')).decode('utf-8')
+        print(f"\n\033[92m📋 10个随机地址的Base64订阅:\033[0m")
+        print(f"   {subscription_base64}")
+    else:
+        print("   (需要启用多端口配置才能生成随机地址)")
+    
     # 作者信息
     print("\n" + "="*80)
     print("\033[36m┌──────────────────────────────────────────────────────────────────────────────┐\033[0m")
@@ -3338,8 +3368,374 @@ def show_final_summary(server_address, port, port_range, password, obfs_password
     print("\033[36m│ \033[32mTelegram: https://t.me/+WibQp7Mww1k5MmZl                   \033[36m│\033[0m")
     print("\033[36m└──────────────────────────────────────────────────────────────────────────────┘\033[0m")
     print("="*80)
-    print("\n🎯 连接成功后即可享受高速稳定的网络体验！")
-    print("💡 如遇问题，请联系作者获取技术支持\n")
+    
+    # 保存配置信息到全局文件
+    save_global_config(server_address, port, port_range, password, obfs_password, hysteria_443_url, random_ports)
+    
+    # 醒目的成功信息
+    print("\n" + "🎉"*20)
+    print("\033[32m" + "="*80 + "\033[0m")
+    print("\033[32m" + "║" + " "*78 + "║" + "\033[0m")
+    print("\033[32m" + "║" + "🎯 部署完成！连接成功后即可享受高速稳定的网络体验！".center(76) + "║" + "\033[0m")
+    print("\033[32m" + "║" + " "*78 + "║" + "\033[0m")
+    print("\033[32m" + "║" + "✅ 已创建全局管理命令，输入 'kk' 进入管理菜单".center(74) + "║" + "\033[0m")
+    print("\033[32m" + "║" + " "*78 + "║" + "\033[0m")
+    print("\033[32m" + "║" + "💡 菜单功能：1-查看节点 2-查看配置 3-服务状态 4-重启服务 5-查看日志 6-删除服务".center(66) + "║" + "\033[0m")
+    print("\033[32m" + "║" + " "*78 + "║" + "\033[0m")
+    print("\033[32m" + "║" + "💬 如遇问题，请联系作者获取技术支持".center(70) + "║" + "\033[0m")
+    print("\033[32m" + "║" + " "*78 + "║" + "\033[0m")
+    print("\033[32m" + "="*80 + "\033[0m")
+    print("🎉"*20 + "\n")
+
+def save_global_config(server_address, port, port_range, password, obfs_password, hysteria_443_url, random_ports):
+    """保存配置信息到全局文件，并创建kk命令"""
+    try:
+        home = get_user_home()
+        config_dir = f"{home}/.hysteria2"
+        
+        # 保存配置信息
+        global_config = {
+            "server_address": server_address,
+            "port": port,
+            "port_range": port_range,
+            "password": password,
+            "obfs_password": obfs_password,
+            "hysteria_443_url": hysteria_443_url,
+            "random_ports": random_ports,
+            "timestamp": time.time()
+        }
+        
+        config_file = f"{config_dir}/global_config.json"
+        with open(config_file, 'w', encoding='utf-8') as f:
+            json.dump(global_config, f, indent=2, ensure_ascii=False)
+        
+        # 创建kk命令脚本
+        kk_script_content = f'''#!/bin/bash
+# Hysteria2 管理工具
+# 作者: 康康
+
+CONFIG_FILE="{config_file}"
+BASE_DIR="$HOME/.hysteria2"
+
+# 检查配置文件是否存在
+if [ ! -f "$CONFIG_FILE" ]; then
+    echo "❌ 配置文件不存在: $CONFIG_FILE"
+    echo "💡 请先运行 Hysteria2 部署脚本"
+    exit 1
+fi
+
+# 读取配置函数
+load_config() {{
+    CONFIG=$(cat "$CONFIG_FILE")
+    SERVER_ADDRESS=$(echo "$CONFIG" | python3 -c "import sys, json; print(json.load(sys.stdin)['server_address'])" 2>/dev/null || echo "N/A")
+    PORT=$(echo "$CONFIG" | python3 -c "import sys, json; print(json.load(sys.stdin)['port'])" 2>/dev/null || echo "N/A")
+    PORT_RANGE=$(echo "$CONFIG" | python3 -c "import sys, json; print(json.load(sys.stdin).get('port_range', 'N/A'))" 2>/dev/null || echo "N/A")
+    PASSWORD=$(echo "$CONFIG" | python3 -c "import sys, json; print(json.load(sys.stdin)['password'])" 2>/dev/null || echo "N/A")
+    OBFS_PASSWORD=$(echo "$CONFIG" | python3 -c "import sys, json; print(json.load(sys.stdin)['obfs_password'])" 2>/dev/null || echo "N/A")
+    HYSTERIA_443_URL=$(echo "$CONFIG" | python3 -c "import sys, json; print(json.load(sys.stdin)['hysteria_443_url'])" 2>/dev/null || echo "N/A")
+    RANDOM_PORTS=$(echo "$CONFIG" | python3 -c "import sys, json; print(' '.join(map(str, json.load(sys.stdin)['random_ports'])))" 2>/dev/null || echo "")
+}}
+
+# 显示节点信息
+show_node_info() {{
+    load_config
+    echo "╔══════════════════════════════════════════════════════════════════════════════╗"
+    echo "║                           🚀 Hysteria2 节点信息                              ║"
+    echo "╠══════════════════════════════════════════════════════════════════════════════╣"
+    echo "║ 📡 服务器: $SERVER_ADDRESS"
+    echo "║ 🔌 端口: $PORT (UDP)"
+    echo "║ 🔢 端口范围: $PORT_RANGE"
+    echo "║ 🔐 密码: $PASSWORD"
+    echo "║ 🔒 混淆密码: $OBFS_PASSWORD"
+    echo "╚══════════════════════════════════════════════════════════════════════════════╝"
+    
+    echo ""
+    echo "🎯 443端口连接地址:"
+    echo "$HYSTERIA_443_URL"
+    
+    echo ""
+    echo "🔀 10个随机v2ray地址 (可直接复制):"
+    if [ -n "$RANDOM_PORTS" ]; then
+        URLS=""
+        for port in $RANDOM_PORTS; do
+            url="hysteria2://$(python3 -c "import urllib.parse; print(urllib.parse.quote('$PASSWORD'))")@$SERVER_ADDRESS:$port?insecure=1&sni=$SERVER_ADDRESS&obfs=salamander&obfs-password=$(python3 -c "import urllib.parse; print(urllib.parse.quote('$OBFS_PASSWORD'))")#V2Ray-$port"
+            echo "$url"
+            if [ -z "$URLS" ]; then
+                URLS="$url"
+            else
+                URLS="$URLS\\n$url"
+            fi
+        done
+        
+        echo ""
+        echo "📋 Base64订阅格式 (可直接添加到v2rayN):"
+        echo -e "$URLS" | python3 -c "import sys, base64; print(base64.b64encode(sys.stdin.read().encode()).decode())"
+    else
+        echo "(需要启用多端口配置才能生成随机地址)"
+    fi
+}}
+
+# 显示配置文件信息
+show_config_info() {{
+    load_config
+    echo "╔══════════════════════════════════════════════════════════════════════════════╗"
+    echo "║                           📁 配置文件信息                                    ║"
+    echo "╚══════════════════════════════════════════════════════════════════════════════╝"
+    
+    echo ""
+    echo "📥 配置文件下载地址:"
+    echo "• v2rayN多端口订阅: http://$SERVER_ADDRESS:8080/v2rayn-subscription.txt"
+    echo "• 多端口配置明文: http://$SERVER_ADDRESS:8080/multi-port-links.txt"
+    echo "• Clash多端口配置: http://$SERVER_ADDRESS:8080/clash.yaml"
+    echo "• 官方客户端配置: http://$SERVER_ADDRESS:8080/hysteria2.json"
+    
+    echo ""
+    echo "📂 本地配置文件:"
+    if [ -f "$BASE_DIR/config/config.json" ]; then
+        echo "✅ Hysteria2配置: $BASE_DIR/config/config.json"
+    else
+        echo "❌ Hysteria2配置: 文件不存在"
+    fi
+    
+    if [ -f "$BASE_DIR/cert/cert.pem" ]; then
+        echo "✅ SSL证书: $BASE_DIR/cert/cert.pem"
+    else
+        echo "❌ SSL证书: 文件不存在"
+    fi
+    
+    if [ -f "$BASE_DIR/logs/hysteria.log" ]; then
+        echo "✅ 日志文件: $BASE_DIR/logs/hysteria.log"
+    else
+        echo "❌ 日志文件: 文件不存在"
+    fi
+}}
+
+# 查看服务状态
+show_service_status() {{
+    echo "╔══════════════════════════════════════════════════════════════════════════════╗"
+    echo "║                           📊 服务状态                                        ║"
+    echo "╚══════════════════════════════════════════════════════════════════════════════╝"
+    
+    # 检查Hysteria2进程
+    if pgrep -f "hysteria" > /dev/null; then
+        echo "✅ Hysteria2服务: 运行中"
+        echo "   进程ID: $(pgrep -f hysteria)"
+    else
+        echo "❌ Hysteria2服务: 未运行"
+    fi
+    
+    # 检查nginx进程
+    if pgrep -f "nginx" > /dev/null; then
+        echo "✅ nginx服务: 运行中"
+    else
+        echo "❌ nginx服务: 未运行"
+    fi
+    
+    # 检查端口监听
+    load_config
+    if [ "$PORT" != "N/A" ]; then
+        if netstat -ulnp 2>/dev/null | grep ":$PORT " > /dev/null; then
+            echo "✅ UDP端口 $PORT: 监听中"
+        else
+            echo "❌ UDP端口 $PORT: 未监听"
+        fi
+    fi
+    
+    if netstat -tlnp 2>/dev/null | grep ":443 " > /dev/null; then
+        echo "✅ TCP端口 443: 监听中 (nginx)"
+    else
+        echo "❌ TCP端口 443: 未监听"
+    fi
+    
+    if netstat -tlnp 2>/dev/null | grep ":8080 " > /dev/null; then
+        echo "✅ TCP端口 8080: 监听中 (配置下载)"
+    else
+        echo "❌ TCP端口 8080: 未监听"
+    fi
+}}
+
+# 重启服务
+restart_service() {{
+    echo "🔄 重启Hysteria2服务..."
+    
+    # 停止服务
+    if [ -f "$BASE_DIR/stop.sh" ]; then
+        echo "⏹️ 停止当前服务..."
+        bash "$BASE_DIR/stop.sh"
+        sleep 2
+    fi
+    
+    # 启动服务
+    if [ -f "$BASE_DIR/start.sh" ]; then
+        echo "▶️ 启动服务..."
+        bash "$BASE_DIR/start.sh"
+        sleep 3
+        
+        # 检查服务状态
+        if pgrep -f "hysteria" > /dev/null; then
+            echo "✅ 服务重启成功"
+        else
+            echo "❌ 服务重启失败"
+        fi
+    else
+        echo "❌ 启动脚本不存在: $BASE_DIR/start.sh"
+    fi
+}}
+
+# 查看日志
+show_logs() {{
+    echo "╔══════════════════════════════════════════════════════════════════════════════╗"
+    echo "║                           📋 查看日志                                        ║"
+    echo "╚══════════════════════════════════════════════════════════════════════════════╝"
+    
+    if [ -f "$BASE_DIR/logs/hysteria.log" ]; then
+        echo "📄 显示最新50行日志:"
+        echo "----------------------------------------"
+        tail -n 50 "$BASE_DIR/logs/hysteria.log"
+        echo "----------------------------------------"
+        echo "💡 实时查看日志: tail -f $BASE_DIR/logs/hysteria.log"
+    else
+        echo "❌ 日志文件不存在: $BASE_DIR/logs/hysteria.log"
+    fi
+}}
+
+# 删除服务
+delete_service() {{
+    echo "⚠️ 确认要删除Hysteria2服务吗？这将删除所有配置和文件！"
+    echo "输入 'yes' 确认删除，其他任意键取消:"
+    read -r confirm
+    
+    if [ "$confirm" = "yes" ]; then
+        echo "🗑️ 正在删除Hysteria2服务..."
+        
+        # 停止服务
+        if [ -f "$BASE_DIR/stop.sh" ]; then
+            bash "$BASE_DIR/stop.sh"
+        fi
+        
+        # 删除文件
+        if [ -d "$BASE_DIR" ]; then
+            rm -rf "$BASE_DIR"
+            echo "✅ 已删除配置目录: $BASE_DIR"
+        fi
+        
+        # 删除配置文件
+        if [ -f "$CONFIG_FILE" ]; then
+            rm -f "$CONFIG_FILE"
+            echo "✅ 已删除全局配置: $CONFIG_FILE"
+        fi
+        
+        echo "✅ Hysteria2服务已完全删除"
+    else
+        echo "❌ 取消删除操作"
+    fi
+}}
+
+# 主菜单
+show_menu() {{
+    clear
+    echo "╔══════════════════════════════════════════════════════════════════════════════╗"
+    echo "║                         🚀 Hysteria2 管理工具                                ║"
+    echo "╠══════════════════════════════════════════════════════════════════════════════╣"
+    echo "║                              作者: 康康                                      ║"
+    echo "╚══════════════════════════════════════════════════════════════════════════════╝"
+    echo ""
+    echo "请选择操作："
+    echo "1️⃣  查看节点信息"
+    echo "2️⃣  查看配置文件"
+    echo "3️⃣  查看服务状态"
+    echo "4️⃣  重启服务"
+    echo "5️⃣  查看日志"
+    echo "6️⃣  删除服务"
+    echo "0️⃣  退出"
+    echo ""
+    echo "👨‍💻 GitHub: https://github.com/zhumengkang/"
+    echo "📺 YouTube: https://www.youtube.com/@康康的V2Ray与Clash"
+    echo "💬 Telegram: https://t.me/+WibQp7Mww1k5MmZl"
+    echo ""
+}}
+
+# 主程序
+while true; do
+    show_menu
+    echo -n "请输入选项 (0-6): "
+    read -r choice
+    echo ""
+    
+    case $choice in
+        1)
+            show_node_info
+            echo ""
+            echo "按任意键返回主菜单..."
+            read -r
+            ;;
+        2)
+            show_config_info
+            echo ""
+            echo "按任意键返回主菜单..."
+            read -r
+            ;;
+        3)
+            show_service_status
+            echo ""
+            echo "按任意键返回主菜单..."
+            read -r
+            ;;
+        4)
+            restart_service
+            echo ""
+            echo "按任意键返回主菜单..."
+            read -r
+            ;;
+        5)
+            show_logs
+            echo ""
+            echo "按任意键返回主菜单..."
+            read -r
+            ;;
+        6)
+            delete_service
+            echo ""
+            echo "按任意键返回主菜单..."
+            read -r
+            ;;
+        0)
+            echo "👋 感谢使用 Hysteria2 管理工具！"
+            exit 0
+            ;;
+        *)
+            echo "❌ 无效选项，请输入 0-6"
+            echo ""
+            echo "按任意键继续..."
+            read -r
+            ;;
+    esac
+done
+'''
+        
+        # 创建kk命令文件
+        kk_script_path = "/usr/local/bin/kk"
+        try:
+            with open(kk_script_path, 'w', encoding='utf-8') as f:
+                f.write(kk_script_content)
+            os.chmod(kk_script_path, 0o755)
+            print(f"✅ 已创建全局命令: {kk_script_path}")
+        except PermissionError:
+            # 如果没有权限写入/usr/local/bin，尝试写入用户目录
+            user_bin = f"{home}/bin"
+            os.makedirs(user_bin, exist_ok=True)
+            kk_script_path = f"{user_bin}/kk"
+            with open(kk_script_path, 'w', encoding='utf-8') as f:
+                f.write(kk_script_content)
+            os.chmod(kk_script_path, 0o755)
+            print(f"✅ 已创建用户命令: {kk_script_path}")
+            print(f"💡 请确保 {user_bin} 在PATH环境变量中")
+        
+        return True
+        
+    except Exception as e:
+        print(f"⚠️ 保存全局配置失败: {e}")
+        return False
 
 def generate_multi_port_subscription(server_address, password, obfs_password, port_start, port_end, base_dir, num_configs=100):
     """
