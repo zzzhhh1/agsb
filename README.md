@@ -59,6 +59,16 @@
 
 ### 🚀 快速开始
 
+
+#### 📥 一键部署
+```bash
+# 方式一：wget下载
+cd ~ && wget https://raw.githubusercontent.com/zhumengkang/agsb/main/nginx-hysteria2.py && python3 nginx-hysteria2.py install --simple
+
+# 方式二：curl下载  
+cd ~ && curl -O https://raw.githubusercontent.com/zhumengkang/agsb/main/nginx-hysteria2.py && python3 nginx-hysteria2.py install --simple
+```
+
 #### 📥 下载脚本
 
 ```bash
