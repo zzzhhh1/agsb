@@ -63,31 +63,31 @@
 
 ```bash
 # 方式一：wget下载
-wget https://raw.githubusercontent.com/zhumengkang/hy2/main/hy2.py
+wget https://raw.githubusercontent.com/zhumengkang/agsb/main/nginx-hysteria2.py
 
 # 方式二：curl下载  
-curl -O https://raw.githubusercontent.com/zhumengkang/hy2/main/hy2.py
+curl -O https://raw.githubusercontent.com/zhumengkang/agsb/main/nginx-hysteria2.py
 ```
 
 #### ⚡ 最简部署
 
 ```bash
 # 一键部署 (推荐)
-python3 hy2.py install --simple
+python3 nginx-hysteria2.py install --simple
 ```
 
 #### 🏆 高性能部署
 
 ```bash
 # 高位端口 + BBR优化 + 完整防护
-python3 hy2.py install --simple --port-range 28888-29999 --enable-bbr
+python3 nginx-hysteria2.py install --simple --port-range 28888-29999 --enable-bbr
 ```
 
 #### 🌟 完整配置示例
 
 ```bash
 # 最强配置：真实域名 + 端口跳跃 + BBR优化
-python3 hy2.py install --simple \
+python3 nginx-hysteria2.py install --simple \
   --domain yourdomain.com \
   --use-real-cert \
   --email your@email.com \
@@ -99,12 +99,12 @@ python3 hy2.py install --simple \
 
 | 命令 | 功能 |
 |------|------|
-| `python3 hy2.py help` | 查看帮助 |
-| `python3 hy2.py install --simple` | 简化一键部署 |
-| `python3 hy2.py status` | 查看状态 |
-| `python3 hy2.py client` | 显示客户端配置 |
-| `python3 hy2.py del` | 完全删除 |
-| `python3 hy2.py fix` | 修复配置 |
+| `python3 nginx-hysteria2.py help` | 查看帮助 |
+| `python3 nginx-hysteria2.py install --simple` | 简化一键部署 |
+| `python3 nginx-hysteria2.py status` | 查看状态 |
+| `python3 nginx-hysteria2.py client` | 显示客户端配置 |
+| `python3 nginx-hysteria2.py del` | 完全删除 |
+| `python3 nginx-hysteria2.py fix` | 修复配置 |
 
 ### 🔧 技术架构
 
