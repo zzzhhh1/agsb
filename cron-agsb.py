@@ -204,9 +204,8 @@ def print_info():
     print("\033[36m│                \033[33m✨ ArgoSB Python3 一键脚本 ✨               \033[36m│\033[0m")
     print("\033[36m├───────────────────────────────────────────────────────────────┤\033[0m")
     print("\033[36m│ \033[32m作者: 康康                                                  \033[36m│\033[0m")
-    print("\033[36m│ \033[32mGithub: https://github.com/zhumengkang/                    \033[36m│\033[0m")
-    print("\033[36m│ \033[32mYouTube: https://www.youtube.com/@康康的V2Ray与Clash         \033[36m│\033[0m")
-    print("\033[36m│ \033[32mTelegram: https://t.me/+WibQp7Mww1k5MmZl                   \033[36m│\033[0m")
+    print("\033[36m│ \033[32mYouTube: https://www.youtube.com/@kejigongxiang         \033[36m│\033[0m")
+    print("\033[36m│ \033[32mTelegram: https://t.me/kjgxZY                   \033[36m│\033[0m")
     print("\033[36m│ \033[32m版本: 25.5.30 (仅支持Python 3)                             \033[36m│\033[0m")
     print("\033[36m╰───────────────────────────────────────────────────────────────╯\033[0m")
 
