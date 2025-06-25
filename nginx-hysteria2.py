@@ -3363,9 +3363,8 @@ def show_final_summary(server_address, port, port_range, password, obfs_password
     print("\033[36m│                                  作者信息                                      │\033[0m")
     print("\033[36m├──────────────────────────────────────────────────────────────────────────────┤\033[0m")
     print("\033[36m│ \033[32m作者: 康康                                                  \033[36m│\033[0m")
-    print("\033[36m│ \033[32mGithub: https://github.com/zhumengkang/                    \033[36m│\033[0m")
-    print("\033[36m│ \033[32mYouTube: https://www.youtube.com/@康康的V2Ray与Clash         \033[36m│\033[0m")
-    print("\033[36m│ \033[32mTelegram: https://t.me/+WibQp7Mww1k5MmZl                   \033[36m│\033[0m")
+    print("\033[36m│ \033[32mYouTube: https://www.youtube.com/@kejigongxiang         \033[36m│\033[0m")
+    print("\033[36m│ \033[32mTelegram: https://t.me/kjgxZY                   \033[36m│\033[0m")
     print("\033[36m└──────────────────────────────────────────────────────────────────────────────┘\033[0m")
     print("="*80)
     
